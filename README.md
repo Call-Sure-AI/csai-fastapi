@@ -12,8 +12,8 @@ A simple FastAPI starter project with basic routes and configuration.
 
 1. Clone the repository
 ```bash
-git clone <your-repo-url>
-cd <your-repo-name>
+git clone [csai-fastapi](https://github.com/Call-Sure-AI/csai-fastapi)
+cd csai-fastapi
 ```
 
 2. Create and activate virtual environment
