@@ -5,7 +5,7 @@ A simple FastAPI starter project with basic routes and configuration.
 ## Setup
 
 ### Prerequisites
-- Python 3.8+
+- Python 3.12.10
 - pip
 
 ### Installation
