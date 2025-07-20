@@ -1,63 +1,33 @@
-from typing import List, Tuple, Dict
-from psycopg3 import pool
+import os
+from .postgres import BasePostgresClient
+from config import config
 
-class BasePostgresClient:
-    def __init__(self, connection_string: str, pool_limit_min: int, pool_limit_max: int):
-        self.connection_string = connection_string
-        self.pool = pool.SimpleConnectionPool(
-            pool_limit_min,
-            pool_limit_max,
-            self.connection_string
-        )
-        if self.pool:
-            print("PostgreSQL connection pool created successfully")
+class DatabaseClient:
+    _instance = None
+    _client = None
 
-    def execute_query(self, query: str, params: Tuple = None) -> List[Dict]:
-        conn = None
-        try:
-            conn = self.pool.getconn()
-            cursor = conn.cursor()
-            cursor.execute(query, params)
+    def __new__(cls):
+        if cls._instance is None:
+            cls._instance = super(DatabaseClient, cls).__new__(cls)
+        return cls._instance
 
-            if cursor.description:
-                columns = [desc[0] for desc in cursor.description]
-                results = cursor.fetchall()
-                return [dict(zip(columns, row)) for row in results]
+    def __init__(self):
+        if self._client is None:
+            env = os.getenv('FLASK_ENV', 'development')
+            app_config = config.get(env, config['default'])
+            
+            self._client = BasePostgresClient(
+                connection_string=app_config.DATABASE_URL,
+                pool_limit_min=5,
+                pool_limit_max=20
+            )
 
-            conn.commit()
-            return []
+    @property
+    def client(self) -> BasePostgresClient:
+        return self._client
 
-        except Exception as e:
-            if conn:
-                conn.rollback()
-            raise
-        finally:
-            if conn:
-                self.pool.putconn(conn)
+    def close(self):
+        if self._client:
+            self._client.close_all_connections()
 
-    def execute_update(self, query: str, params: Tuple = None) -> int:
-        conn = None
-        try:
-            conn = self.pool.getconn()
-            cursor = conn.cursor()
-            cursor.execute(query, params)
-            affected_rows = cursor.rowcount
-            conn.commit()
-            return affected_rows
-
-        except Exception as e:
-            if conn:
-                conn.rollback()
-            print(f"Database error: {e}")
-            raise
-        finally:
-            if conn:
-                self.pool.putconn(conn)
-
-    def close_all_connections(self):
-        """
-        Close all connections in the pool.
-        """
-        if self.pool:
-            self.pool.closeall()
-            print("All PostgreSQL connections closed")
+postgres_client = DatabaseClient()

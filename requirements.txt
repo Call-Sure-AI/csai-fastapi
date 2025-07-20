@@ -1,26 +1,13 @@
-# Latest, Most Stable & Highest Performance Versions (July 2025)
-# Optimized for Python 3.12.10
-
-# Web Framework - Latest with Python 3.13 support added
-fastapi==0.115.4  # Latest release (July 11, 2025) with performance improvements
-
-# ASGI Server - Latest with WebSocket improvements  
-uvicorn[standard]==0.35.0  # Latest (June 28, 2025) with WebSocketsSansIO protocol
-
-# Database ORM - Latest stable
-sqlalchemy==2.0.36  # Latest stable with performance optimizations
-
-# Data Validation - Latest with 2x schema build performance improvement
-pydantic==2.11.7  # Latest (June 14, 2025) - most performant version yet
-
-# Settings Management - Latest compatible
-pydantic-settings==2.10.1  # Latest (June 24, 2025) with improved validation
-
-# Environment Variables - Latest stable
-python-dotenv==1.0.1  # Latest stable with bug fixes
-
-# Email Validation - Latest stable (2.1.0 was yanked)
-email-validator==2.2.0  # Latest stable with improved validation
-
-# PostgreSQL Adapter - Modern alternative with Python 3.13 support
-psycopg[binary]==3.2.3  # Latest psycopg3 with superior performance and async support
+fastapi==0.115.4 
+uvicorn[standard]==0.35.0 
+sqlalchemy==2.0.36  
+pydantic==2.11.7 
+pydantic-settings==2.10.1  
+python-dotenv==1.0.1  
+email-validator==2.2.0  
+psycopg2
+pyjwt==2.8.0
+google-auth==2.23.3
+google-auth-oauthlib==1.1.0
+bcrypt==4.0.1
+aiosmtplib==1.1.6
