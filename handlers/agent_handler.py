@@ -21,6 +21,29 @@ class AgentHandler:
         if self._db is None:
             self._db = postgres_client.client
         return self._db
+    
+    def _parse_json_fields(self, agent: Dict[str, Any]) -> Dict[str, Any]:
+        """Parse JSON string fields to dictionaries"""
+        json_fields = [
+            'additional_context', 
+            'advanced_settings', 
+            'files', 
+            'knowledge_base_ids', 
+            'database_integration_ids',
+            'search_config',
+            'image_processing_config'
+        ]
+        
+        for field in json_fields:
+            if field in agent and agent[field] is not None:
+                if isinstance(agent[field], str):
+                    try:
+                        agent[field] = json.loads(agent[field])
+                    except json.JSONDecodeError:
+                        logger.warning(f"Failed to parse JSON field {field}: {agent[field]}")
+                        agent[field] = None
+        
+        return agent
         
     async def get_all_agents(self, user_id: str, agent_id: Optional[str] = None) -> List[Dict[str, Any]]:
         """Get all agents for a user or a specific agent"""
@@ -32,18 +55,16 @@ class AgentHandler:
             query = """
                 SELECT 
                     a.*,
-                    c.name as company_name,
-                    COUNT(conv.id) as conversation_count
-                FROM agents a
-                LEFT JOIN companies c ON a.company_id = c.id
-                LEFT JOIN conversations conv ON a.id = conv.agent_id
+                    c.name as company_name
+                FROM "Agent" a
+                LEFT JOIN "Company" c ON a.company_id = c.id
                 WHERE a.user_id = $1
-                GROUP BY a.id, c.name
                 ORDER BY a.created_at DESC
             """
             
             agents = await self.db.execute_query(query, (user_id,))
-            return agents
+            # Parse JSON fields for each agent
+            return [self._parse_json_fields(agent) for agent in agents]
             
         except Exception as error:
             logger.error(f"Error fetching agents: {error}")
@@ -55,21 +76,19 @@ class AgentHandler:
             query = """
                 SELECT 
                     a.*,
-                    c.name as company_name,
-                    COUNT(conv.id) as conversation_count
-                FROM agents a
-                LEFT JOIN companies c ON a.company_id = c.id
-                LEFT JOIN conversations conv ON a.id = conv.agent_id
+                    c.name as company_name
+                FROM "Agent" a
+                LEFT JOIN "Company" c ON a.company_id = c.id
                 WHERE a.id = $1
-                GROUP BY a.id, c.name
             """
             
             agent = await self.db.execute_query_one(query, (agent_id,))
             
             if not agent:
                 raise ValueError("Agent not found")
-                
-            return agent
+            
+            # Parse JSON fields
+            return self._parse_json_fields(agent)
             
         except ValueError:
             raise
@@ -83,18 +102,16 @@ class AgentHandler:
             query = """
                 SELECT 
                     a.*,
-                    c.name as company_name,
-                    COUNT(conv.id) as conversation_count
-                FROM agents a
-                LEFT JOIN companies c ON a.company_id = c.id
-                LEFT JOIN conversations conv ON a.id = conv.agent_id
+                    c.name as company_name
+                FROM "Agent" a
+                LEFT JOIN "Company" c ON a.company_id = c.id
                 WHERE a.user_id = $1
-                GROUP BY a.id, c.name
                 ORDER BY a.created_at DESC
             """
             
             agents = await self.db.execute_query(query, (user_id,))
-            return agents
+            # Parse JSON fields for each agent
+            return [self._parse_json_fields(agent) for agent in agents]
             
         except Exception as error:
             logger.error(f"Error fetching agents: {error}")
@@ -111,7 +128,7 @@ class AgentHandler:
             
             # Check if agent already exists
             check_query = """
-                SELECT * FROM agents 
+                SELECT * FROM "Agent" 
                 WHERE name = $1 AND company_id = $2
             """
             existing_agents = await self.db.execute_query(
@@ -120,7 +137,7 @@ class AgentHandler:
             
             if existing_agents:
                 logger.info(f'Agent already exists with name "{agent_data.name}" for company ID "{agent_data.company_id}"')
-                return existing_agents[0]
+                return self._parse_json_fields(existing_agents[0])
 
             # Create new agent
             agent_id = str(uuid.uuid4())
@@ -130,7 +147,7 @@ class AgentHandler:
             agent_dict = agent_data.dict()
             
             insert_query = """
-                INSERT INTO agents (
+                INSERT INTO "Agent" (
                     id, user_id, name, type, is_active, company_id, prompt,
                     additional_context, advanced_settings, confidence_threshold,
                     files, template_id, knowledge_base_ids, database_integration_ids,
@@ -177,7 +194,7 @@ class AgentHandler:
                 
             logger.info(f'Successfully created agent with ID "{result["id"]}" for company ID "{result["company_id"]}"')
             
-            # Log activity asynchronously (fire and forget)
+            # Log activity asynchronously (fire and forget) - if activities table exists
             try:
                 activity_query = """
                     INSERT INTO activities (user_id, action, entity_type, entity_id, metadata, created_at)
@@ -196,9 +213,10 @@ class AgentHandler:
                     )
                 )
             except Exception as log_error:
-                logger.error(f'Failed to log agent creation activity: {log_error}')
+                # Don't fail if activities table doesn't exist
+                logger.warning(f'Failed to log agent creation activity: {log_error}')
             
-            return result
+            return self._parse_json_fields(result)
                 
         except ValueError:
             raise
@@ -244,7 +262,7 @@ class AgentHandler:
             values.append(agent_id)
             
             query = f"""
-                UPDATE agents 
+                UPDATE "Agent" 
                 SET {', '.join(update_fields)}
                 WHERE id = ${param_count}
                 RETURNING *
@@ -255,7 +273,7 @@ class AgentHandler:
             if not result:
                 raise Exception("Failed to update agent")
             
-            # Log activity asynchronously
+            # Log activity asynchronously - if activities table exists
             try:
                 activity_query = """
                     INSERT INTO activities (user_id, action, entity_type, entity_id, metadata, created_at)
@@ -269,9 +287,9 @@ class AgentHandler:
                     )
                 )
             except Exception as log_error:
-                logger.error(f'Failed to log agent update activity: {log_error}')
+                logger.warning(f'Failed to log agent update activity: {log_error}')
                 
-            return result
+            return self._parse_json_fields(result)
                 
         except ValueError:
             raise
@@ -289,7 +307,7 @@ class AgentHandler:
                 raise ValueError("Agent not found")
 
             query = """
-                DELETE FROM agents 
+                DELETE FROM "Agent" 
                 WHERE id = $1 
                 RETURNING *
             """
@@ -299,7 +317,7 @@ class AgentHandler:
             if not result:
                 raise ValueError("Agent not found")
             
-            # Log activity asynchronously
+            # Log activity asynchronously - if activities table exists
             try:
                 activity_query = """
                     INSERT INTO activities (user_id, action, entity_type, entity_id, metadata, created_at)
@@ -313,9 +331,9 @@ class AgentHandler:
                     )
                 )
             except Exception as log_error:
-                logger.error(f'Failed to log agent deletion activity: {log_error}')
+                logger.warning(f'Failed to log agent deletion activity: {log_error}')
                 
-            return result
+            return self._parse_json_fields(result)
                 
         except ValueError:
             raise

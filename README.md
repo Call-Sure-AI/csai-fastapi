@@ -125,7 +125,17 @@ API Structure
 /api/s3/*              # File storage
 /api/health            # API health check
 
+API Endpoints
+With this setup, your endpoints will be:
 
+GET /api/agents/ - Get all agents for the current user
+GET /api/agents/test - Test endpoint (public)
+GET /api/agents/{agent_id} - Get specific agent
+GET /api/agents/user/{user_id} - Get agents by user ID
+POST /api/agents/ - Create new agent
+PUT /api/agents/{agent_id} - Update agent
+DELETE /api/agents/{agent_id} - Delete agent
+ 
 This structure is much better for a production voice calling system because it:
 
 Keeps the main.py focused on app configuration
