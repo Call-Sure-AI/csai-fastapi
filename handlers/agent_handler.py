@@ -18,7 +18,7 @@ class AgentHandler:
             if agent_id:
                 return await self.get_agent_by_id(agent_id)
             
-            async with get_db_connection() as conn:
+            async with postgres_client.client.get_connection() as conn:
                 agents = await self.agent_queries.get_agents_by_user_id(conn, user_id)
                 return agents
         except Exception as error:
@@ -27,7 +27,7 @@ class AgentHandler:
 
     async def get_agent_by_id(self, agent_id: str) -> Dict[str, Any]:
         try:
-            async with get_db_connection() as conn:
+            async with postgres_client.client.get_connection() as conn:
                 agent = await self.agent_queries.get_agent_by_id(conn, agent_id)
                 
                 if not agent:
@@ -42,7 +42,7 @@ class AgentHandler:
 
     async def get_agents_by_user_id(self, user_id: str) -> List[Dict[str, Any]]:
         try:
-            async with get_db_connection() as conn:
+            async with postgres_client.client.get_connection() as conn:
                 agents = await self.agent_queries.get_agents_by_user_id(conn, user_id)
                 return agents
         except Exception as error:
@@ -57,7 +57,7 @@ class AgentHandler:
                 logger.error("Missing company_id in agent creation request")
                 raise ValueError("company_id is required")
             
-            async with get_db_connection() as conn:
+            async with postgres_client.client.get_connection() as conn:
                 existing_agent = await self.agent_queries.get_agent_by_name_and_company(
                     conn, agent_data.name, agent_data.company_id
                 )
@@ -111,7 +111,7 @@ class AgentHandler:
 
     async def update_agent(self, agent_id: str, agent_data: AgentUpdate, user_id: str) -> Dict[str, Any]:
         try:
-            async with get_db_connection() as conn:
+            async with postgres_client.client.get_connection() as conn:
                 existing_agent = await self.agent_queries.get_agent_by_id(conn, agent_id)
                 
                 if not existing_agent:
@@ -142,7 +142,7 @@ class AgentHandler:
 
     async def delete_agent(self, agent_id: str, user_id: str) -> Dict[str, Any]:
         try:
-            async with get_db_connection() as conn:
+            async with postgres_client.client.get_connection() as conn:
                 agent = await self.agent_queries.get_agent_by_id(conn, agent_id)
                 
                 if not agent:
