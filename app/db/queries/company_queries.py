@@ -1,153 +1,222 @@
-from typing import Dict, List, Optional, Tuple
+from typing import List, Dict, Any, Optional
+from app.models.schemas import CompanyCreate, CompanyUpdate
+import asyncpg
+import json
+from datetime import datetime
 
 class CompanyQueries:
-    """All SQL queries related to Company and CompanyMember tables"""
     
-    GET_COMPANIES_BY_OWNER = """
-        SELECT * FROM "Company" WHERE "user_id" = %s
-    """
+    async def get_companies_by_user_id(self, conn: asyncpg.Connection, user_id: str) -> List[Dict[str, Any]]:
+        query = """
+            SELECT 
+                c.*,
+                COUNT(DISTINCT a.id) as agent_count,
+                json_agg(DISTINCT jsonb_build_object(
+                    'id', a.id,
+                    'name', a.name,
+                    'type', a.type,
+                    'is_active', a.is_active
+                )) FILTER (WHERE a.id IS NOT NULL) as agents,
+                json_agg(DISTINCT jsonb_build_object(
+                    'id', call.id,
+                    'created_at', call.created_at
+                ) ORDER BY call.created_at DESC) FILTER (WHERE call.id IS NOT NULL) as recent_calls,
+                json_agg(DISTINCT jsonb_build_object(
+                    'id', conv.id,
+                    'created_at', conv.created_at
+                ) ORDER BY conv.created_at DESC) FILTER (WHERE conv.id IS NOT NULL) as recent_conversations
+            FROM companies c
+            LEFT JOIN agents a ON c.id = a.company_id
+            LEFT JOIN calls call ON c.id = call.company_id
+            LEFT JOIN conversations conv ON c.id = conv.company_id
+            WHERE c.user_id = $1
+            GROUP BY c.id
+            ORDER BY c.created_at DESC
+        """
+        rows = await conn.fetch(query, user_id)
+        return [dict(row) for row in rows]
     
-    GET_COMPANY_BY_ID = """
-        SELECT * FROM "Company" WHERE id = %s
-    """
+    async def get_user_with_memberships(self, conn: asyncpg.Connection, user_id: str) -> Optional[Dict[str, Any]]:
+        query = """
+            SELECT 
+                u.id,
+                json_agg(jsonb_build_object(
+                    'company_id', cm.company_id
+                )) FILTER (WHERE cm.company_id IS NOT NULL) as company_memberships
+            FROM users u
+            LEFT JOIN company_memberships cm ON u.id = cm.user_id
+            WHERE u.id = $1
+            GROUP BY u.id
+        """
+        row = await conn.fetchrow(query, user_id)
+        return dict(row) if row else None
     
-    COUNT_COMPANIES_BY_OWNER = """
-        SELECT COUNT(*) as count FROM "Company" WHERE "user_id" = %s
-    """
+    async def get_company_by_user_id_single(self, conn: asyncpg.Connection, user_id: str) -> Optional[Dict[str, Any]]:
+        query = """
+            SELECT 
+                c.*,
+                json_agg(DISTINCT jsonb_build_object(
+                    'id', a.id,
+                    'name', a.name,
+                    'type', a.type,
+                    'is_active', a.is_active
+                )) FILTER (WHERE a.id IS NOT NULL) as agents,
+                json_agg(DISTINCT jsonb_build_object(
+                    'id', call.id,
+                    'created_at', call.created_at
+                ) ORDER BY call.created_at DESC) FILTER (WHERE call.id IS NOT NULL) as recent_calls,
+                json_agg(DISTINCT jsonb_build_object(
+                    'id', conv.id,
+                    'created_at', conv.created_at
+                ) ORDER BY conv.created_at DESC) FILTER (WHERE conv.id IS NOT NULL) as recent_conversations
+            FROM companies c
+            LEFT JOIN agents a ON c.id = a.company_id
+            LEFT JOIN calls call ON c.id = call.company_id
+            LEFT JOIN conversations conv ON c.id = conv.company_id
+            WHERE c.user_id = $1
+            GROUP BY c.id
+            ORDER BY c.created_at DESC
+            LIMIT 1
+        """
+        row = await conn.fetchrow(query, user_id)
+        return dict(row) if row else None
     
-    GET_COMPANIES_WITH_OWNER = """
-        SELECT c.*, u.name as owner_name, u.email as owner_email
-        FROM "Company" c
-        JOIN "User" u ON c."user_id" = u.id
-        WHERE c.id = %s
-    """
+    async def get_company_by_id(self, conn: asyncpg.Connection, company_id: str) -> Optional[Dict[str, Any]]:
+        query = """
+            SELECT 
+                c.*,
+                json_agg(DISTINCT jsonb_build_object(
+                    'id', a.id,
+                    'name', a.name,
+                    'type', a.type,
+                    'is_active', a.is_active
+                )) FILTER (WHERE a.id IS NOT NULL) as agents,
+                json_agg(DISTINCT jsonb_build_object(
+                    'id', call.id,
+                    'created_at', call.created_at
+                ) ORDER BY call.created_at DESC) FILTER (WHERE call.id IS NOT NULL) as recent_calls,
+                json_agg(DISTINCT jsonb_build_object(
+                    'id', conv.id,
+                    'created_at', conv.created_at
+                ) ORDER BY conv.created_at DESC) FILTER (WHERE conv.id IS NOT NULL) as recent_conversations
+            FROM companies c
+            LEFT JOIN agents a ON c.id = a.company_id
+            LEFT JOIN calls call ON c.id = call.company_id
+            LEFT JOIN conversations conv ON c.id = conv.company_id
+            WHERE c.id = $1
+            GROUP BY c.id
+        """
+        row = await conn.fetchrow(query, company_id)
+        return dict(row) if row else None
     
-    GET_USER_MEMBERSHIPS = """
-        SELECT cm.*, c.name as company_name, c."business_name" as company_business_name
-        FROM "CompanyMember" cm
-        JOIN "Company" c ON cm."company_id" = c.id
-        WHERE cm."user_id" = %s
-    """
+    async def get_companies_by_user_id_simple(self, conn: asyncpg.Connection, user_id: str) -> List[Dict[str, Any]]:
+        query = """
+            SELECT 
+                c.*,
+                json_agg(DISTINCT jsonb_build_object(
+                    'id', a.id,
+                    'name', a.name,
+                    'type', a.type
+                )) FILTER (WHERE a.id IS NOT NULL) as agents,
+                json_agg(DISTINCT jsonb_build_object(
+                    'id', call.id
+                )) FILTER (WHERE call.id IS NOT NULL) as calls
+            FROM companies c
+            LEFT JOIN agents a ON c.id = a.company_id
+            LEFT JOIN calls call ON c.id = call.company_id
+            WHERE c.user_id = $1
+            GROUP BY c.id
+            ORDER BY c.created_at DESC
+        """
+        rows = await conn.fetch(query, user_id)
+        return [dict(row) for row in rows]
     
-    GET_COMPANY_MEMBERS = """
-        SELECT cm.*, u.name as user_name, u.email as user_email, u.image as user_image
-        FROM "CompanyMember" cm
-        JOIN "User" u ON cm."user_id" = u.id
-        WHERE cm."company_id" = %s
-    """
+    async def get_company_by_id_and_user(self, conn: asyncpg.Connection, company_id: str, user_id: str) -> Optional[Dict[str, Any]]:
+        query = """
+            SELECT * FROM companies 
+            WHERE id = $1 AND user_id = $2
+        """
+        row = await conn.fetchrow(query, company_id, user_id)
+        return dict(row) if row else None
     
-    GET_USER_ROLE_IN_COMPANY = """
-        SELECT role FROM "CompanyMember" 
-        WHERE "user_id" = %s AND "company_id" = %s
-    """
+    async def create_company(self, conn: asyncpg.Connection, company_data: CompanyCreate, user_id: str, api_key: str) -> Dict[str, Any]:
+        query = """
+            INSERT INTO companies (
+                name, business_name, email, address, website, logo,
+                prompt_templates, phone_number, settings, user_id, api_key,
+                created_at, updated_at
+            )
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, NOW(), NOW())
+            RETURNING *
+        """
+        
+        company_dict = company_data.dict()
+        prompt_templates_json = json.dumps(company_dict.get('prompt_templates')) if company_dict.get('prompt_templates') else None
+        settings_json = json.dumps(company_dict.get('settings')) if company_dict.get('settings') else None
+        
+        row = await conn.fetchrow(
+            query,
+            company_data.name,
+            company_data.business_name,
+            company_data.email,
+            company_data.address,
+            company_data.website,
+            company_data.logo,
+            prompt_templates_json,
+            company_data.phone_number,
+            settings_json,
+            user_id,
+            api_key
+        )
+        return dict(row)
     
-    GET_USER_FIRST_MEMBERSHIP = """
-        SELECT role FROM "CompanyMember" 
-        WHERE "user_id" = %s 
-        ORDER BY "created_at" ASC 
-        LIMIT 1
-    """
+    async def update_company(self, conn: asyncpg.Connection, company_id: str, company_data: CompanyUpdate, user_id: str) -> Dict[str, Any]:
+        update_fields = []
+        values = []
+        param_count = 1
+        
+        company_dict = company_data.dict(exclude_unset=True)
+        
+        for field, value in company_dict.items():
+            if field in ['prompt_templates', 'settings']:
+                values.append(json.dumps(value) if value else None)
+            else:
+                values.append(value)
+            
+            update_fields.append(f"{field} = ${param_count}")
+            param_count += 1
+        
+        if not update_fields:
+            return await self.get_company_by_id_and_user(conn, company_id, user_id)
+        
+        update_fields.append(f"updated_at = NOW()")
+        values.extend([company_id, user_id])
+        
+        query = f"""
+            UPDATE companies 
+            SET {', '.join(update_fields)}
+            WHERE id = ${param_count} AND user_id = ${param_count + 1}
+            RETURNING *
+        """
+        
+        row = await conn.fetchrow(query, *values)
+        return dict(row)
     
-    CHECK_MEMBERSHIP_EXISTS = """
-        SELECT id FROM "CompanyMember" 
-        WHERE "user_id" = %s AND "company_id" = %s
-    """
+    async def delete_company(self, conn: asyncpg.Connection, company_id: str) -> Dict[str, Any]:
+        query = """
+            DELETE FROM companies 
+            WHERE id = $1 
+            RETURNING *
+        """
+        row = await conn.fetchrow(query, company_id)
+        return dict(row)
     
-    GET_COMPANY_WITH_SETTINGS = """
-        SELECT c.*, c.settings, c."image_config", c."prompt_templates"
-        FROM "Company" c
-        WHERE c.id = %s
-    """
-    
-    CREATE_COMPANY = """
-        INSERT INTO "Company" (id, "user_id", name, "business_name", email, address) 
-        VALUES (%s, %s, %s, %s, %s, %s) 
-        RETURNING *
-    """
-    
-    CREATE_COMPANY_BASIC = """
-        INSERT INTO "Company" (id, "user_id", name, "business_name", email, address) 
-        VALUES (%s, %s, %s, %s, %s, %s) 
-        RETURNING *
-    """
-    
-    CREATE_MEMBERSHIP = """
-        INSERT INTO "CompanyMember" (id, "user_id", "company_id", role) 
-        VALUES (%s, %s, %s, %s) 
-        RETURNING *
-    """
-    
-    CREATE_MEMBERSHIP_DEFAULT_ROLE = """
-        INSERT INTO "CompanyMember" (id, "user_id", "company_id") 
-        VALUES (%s, %s, %s) 
-        RETURNING *
-    """
-    
-    UPDATE_COMPANY_INFO = """
-        UPDATE "Company" 
-        SET name = %s, "business_name" = %s, "updated_at" = CURRENT_TIMESTAMP 
-        WHERE id = %s
-        RETURNING *
-    """
-    
-    UPDATE_COMPANY_SETTINGS = """
-        UPDATE "Company" 
-        SET settings = %s, "updated_at" = CURRENT_TIMESTAMP 
-        WHERE id = %s
-        RETURNING *
-    """
-    
-    UPDATE_COMPANY_API_KEY = """
-        UPDATE "Company" 
-        SET "api_key" = %s, "updated_at" = CURRENT_TIMESTAMP 
-        WHERE id = %s
-        RETURNING *
-    """
-    
-    UPDATE_MEMBER_ROLE = """
-        UPDATE "CompanyMember" 
-        SET role = %s, "updated_at" = CURRENT_TIMESTAMP 
-        WHERE "user_id" = %s AND "company_id" = %s
-        RETURNING *
-    """
-    
-    DELETE_COMPANY = """
-        DELETE FROM "Company" WHERE id = %s
-    """
-    
-    DELETE_COMPANIES_BY_OWNER = """
-        DELETE FROM "Company" WHERE "user_id" = %s
-    """
-    
-    DELETE_MEMBERSHIP = """
-        DELETE FROM "CompanyMember" 
-        WHERE "user_id" = %s AND "company_id" = %s
-    """
-    
-    DELETE_MEMBERSHIPS_BY_USER = """
-        DELETE FROM "CompanyMember" WHERE "user_id" = %s
-    """
-    
-    DELETE_MEMBERSHIPS_BY_COMPANY = """
-        DELETE FROM "CompanyMember" WHERE "company_id" = %s
-    """
-
-    @staticmethod
-    def count_companies_by_owner_params(owner_id: str) -> Tuple[str, tuple]:
-        """Count companies owned by user"""
-        return CompanyQueries.COUNT_COMPANIES_BY_OWNER, (owner_id,)
-    
-    @staticmethod
-    def get_user_first_membership_params(userId: str) -> Tuple[str, tuple]:
-        """Get user's first company membership"""
-        return CompanyQueries.GET_USER_FIRST_MEMBERSHIP, (userId,)
-    
-    @staticmethod
-    def create_company_params(company_id: str, name: str, description: str, owner_id: str) -> Tuple[str, tuple]:
-        """Create company parameters"""
-        return CompanyQueries.CREATE_COMPANY, (company_id, name, description, owner_id)
-    
-    @staticmethod
-    def create_membership_params(membership_id: str, userId: str, company_id: str, role: str = 'member') -> Tuple[str, tuple]:
-        """Create company membership parameters"""
-        return CompanyQueries.CREATE_MEMBERSHIP, (membership_id, userId, company_id, role)
+    async def update_api_key(self, conn: asyncpg.Connection, company_id: str, api_key: str) -> Dict[str, Any]:
+        query = """
+            UPDATE companies 
+            SET api_key = $1, updated_at = NOW()
+            WHERE id = $2
+            RETURNING *
+        """
+        row = await conn.fetchrow(query, api_key, company_id)
+        return dict(row)

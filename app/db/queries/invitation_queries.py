@@ -1,84 +1,189 @@
-from typing import Dict, List, Optional, Tuple
+from typing import List, Dict, Any, Optional
 from datetime import datetime
+from app.models.schemas import InvitationCreate
+import asyncpg
 
 class InvitationQueries:
-    """All SQL queries related to Invitation table"""
     
-    GET_INVITATION_BY_TOKEN = """
-        SELECT * FROM "Invitation" WHERE token = %s
-    """
+    async def get_company_by_id(self, conn: asyncpg.Connection, company_id: str) -> Optional[Dict[str, Any]]:
+        query = "SELECT * FROM companies WHERE id = $1"
+        row = await conn.fetchrow(query, company_id)
+        return dict(row) if row else None
     
-    GET_INVITATION_BY_EMAIL = """
-        SELECT * FROM "Invitation" 
-        WHERE email = %s AND "company_id" = %s
-    """
+    async def get_invitation_by_email_and_company(
+        self, conn: asyncpg.Connection, email: str, company_id: str
+    ) -> Optional[Dict[str, Any]]:
+        query = """
+            SELECT * FROM invitations 
+            WHERE email = $1 AND company_id = $2
+        """
+        row = await conn.fetchrow(query, email, company_id)
+        return dict(row) if row else None
     
-    GET_INVITATIONS_BY_COMPANY = """
-        SELECT * FROM "Invitation" 
-        WHERE "company_id" = %s 
-        ORDER BY "created_at" DESC
-    """
+    async def create_invitation(
+        self, conn: asyncpg.Connection, invitation_data: InvitationCreate, token: str, expires_at: datetime
+    ) -> Dict[str, Any]:
+        query = """
+            INSERT INTO invitations (email, company_id, role, token, expires_at, status, created_at, updated_at)
+            VALUES ($1, $2, $3, $4, $5, 'pending', NOW(), NOW())
+            RETURNING *
+        """
+        row = await conn.fetchrow(
+            query,
+            invitation_data.email,
+            invitation_data.company_id,
+            invitation_data.role or 'member',
+            token,
+            expires_at
+        )
+        return dict(row)
     
-    GET_PENDING_INVITATIONS = """
-        SELECT * FROM "Invitation" 
-        WHERE status = 'pending' AND "expires_at" > %s
-    """
+    async def update_invitation(
+        self, conn: asyncpg.Connection, invitation_id: str, token: str, role: str, expires_at: datetime
+    ) -> Dict[str, Any]:
+        query = """
+            UPDATE invitations 
+            SET token = $1, role = $2, expires_at = $3, updated_at = NOW(), status = 'pending'
+            WHERE id = $4
+            RETURNING *
+        """
+        row = await conn.fetchrow(query, token, role, expires_at, invitation_id)
+        return dict(row)
     
-    GET_EXPIRED_INVITATIONS = """
-        SELECT * FROM "Invitation" 
-        WHERE "expires_at" < %s
-    """
+    async def get_invitation_by_token(self, conn: asyncpg.Connection, token: str) -> Optional[Dict[str, Any]]:
+        query = """
+            SELECT 
+                i.*,
+                json_build_object(
+                    'id', c.id,
+                    'name', c.name,
+                    'business_name', c.business_name
+                ) as company
+            FROM invitations i
+            JOIN companies c ON i.company_id = c.id
+            WHERE i.token = $1
+        """
+        row = await conn.fetchrow(query, token)
+        return dict(row) if row else None
     
-    CREATE_INVITATION = """
-        INSERT INTO "Invitation" (id, email, "company_id", role, token, "expires_at") 
-        VALUES (%s, %s, %s, %s, %s, %s) 
-        RETURNING *
-    """
+    async def get_invitation_by_token_with_company(
+        self, conn: asyncpg.Connection, token: str
+    ) -> Optional[Dict[str, Any]]:
+        query = """
+            SELECT 
+                i.*,
+                c.id as company_id,
+                c.name as company_name,
+                c.business_name as company_business_name
+            FROM invitations i
+            JOIN companies c ON i.company_id = c.id
+            WHERE i.token = $1
+        """
+        row = await conn.fetchrow(query, token)
+        if row:
+            invitation = dict(row)
+            invitation['company'] = {
+                'id': invitation['company_id'],
+                'name': invitation['company_name'],
+                'business_name': invitation['company_business_name']
+            }
+            return invitation
+        return None
     
-    UPDATE_INVITATION_STATUS = """
-        UPDATE "Invitation" 
-        SET status = %s, "accepted_at" = %s, "updated_at" = CURRENT_TIMESTAMP 
-        WHERE id = %s
-        RETURNING *
-    """
+    async def get_user_by_email(self, conn: asyncpg.Connection, email: str) -> Optional[Dict[str, Any]]:
+        query = "SELECT * FROM users WHERE email = $1"
+        row = await conn.fetchrow(query, email)
+        return dict(row) if row else None
     
-    ACCEPT_INVITATION = """
-        UPDATE "Invitation" 
-        SET status = 'accepted', "accepted_at" = CURRENT_TIMESTAMP, "updated_at" = CURRENT_TIMESTAMP 
-        WHERE token = %s AND "expires_at" > %s
-        RETURNING *
-    """
-    
-    DELETE_INVITATION = """
-        DELETE FROM "Invitation" WHERE id = %s
-    """
-    
-    DELETE_INVITATIONS_BY_COMPANY = """
-        DELETE FROM "Invitation" WHERE "company_id" = %s
-    """
-    
-    DELETE_EXPIRED_INVITATIONS = """
-        DELETE FROM "Invitation" WHERE "expires_at" < %s
-    """
-    
-    CLEANUP_OLD_INVITATIONS = """
-        DELETE FROM "Invitation" 
-        WHERE status IN ('accepted', 'expired') OR "expires_at" < %s
-    """
+    async def create_user_with_account(
+        self, conn: asyncpg.Connection, email: str, name: str, hashed_password: str
+    ) -> Dict[str, Any]:
 
-    @staticmethod
-    def get_invitation_by_token_params(token: str) -> Tuple[str, tuple]:
-        """Get invitation by token parameters"""
-        return InvitationQueries.GET_INVITATION_BY_TOKEN, (token,)
+        user_query = """
+            INSERT INTO users (email, name, email_verified, created_at, updated_at)
+            VALUES ($1, $2, NOW(), NOW(), NOW())
+            RETURNING *
+        """
+        user = await conn.fetchrow(user_query, email, name)
+        user_dict = dict(user)
+        
+        account_query = """
+            INSERT INTO accounts (user_id, type, provider, provider_account_id, access_token)
+            VALUES ($1, 'credentials', 'credentials', $2, $3)
+        """
+        await conn.execute(account_query, user_dict['id'], email, hashed_password)
+        
+        return user_dict
     
-    @staticmethod
-    def create_invitation_params(invitation_id: str, email: str, company_id: str, role: str, token: str, expires_at: datetime) -> Tuple[str, tuple]:
-        """Create invitation parameters"""
-        return InvitationQueries.CREATE_INVITATION, (invitation_id, email, company_id, role, token, expires_at)
+    async def create_company_membership(
+        self, conn: asyncpg.Connection, user_id: str, company_id: str, role: str
+    ) -> None:
+        query = """
+            INSERT INTO company_members (user_id, company_id, role, created_at, updated_at)
+            VALUES ($1, $2, $3, NOW(), NOW())
+        """
+        await conn.execute(query, user_id, company_id, role)
     
-    @staticmethod
-    def accept_invitation_params(token: str, current_time: datetime = None) -> Tuple[str, tuple]:
-        """Accept invitation parameters"""
-        if current_time is None:
-            current_time = datetime.utcnow()
-        return InvitationQueries.ACCEPT_INVITATION, (token, current_time)
+    async def accept_invitation(self, conn: asyncpg.Connection, invitation_id: str) -> None:
+        query = """
+            UPDATE invitations 
+            SET status = 'accepted', accepted_at = NOW(), updated_at = NOW()
+            WHERE id = $1
+        """
+        await conn.execute(query, invitation_id)
+    
+    async def get_pending_invitations(
+        self, conn: asyncpg.Connection, company_id: str
+    ) -> List[Dict[str, Any]]:
+        query = """
+            SELECT * FROM invitations
+            WHERE company_id = $1 AND expires_at > NOW()
+            ORDER BY created_at DESC
+        """
+        rows = await conn.fetch(query, company_id)
+        return [dict(row) for row in rows]
+    
+    async def get_accepted_invitations(
+        self, conn: asyncpg.Connection, company_id: str
+    ) -> List[Dict[str, Any]]:
+        query = """
+            SELECT * FROM invitations
+            WHERE company_id = $1 AND status = 'accepted'
+            ORDER BY accepted_at DESC
+        """
+        rows = await conn.fetch(query, company_id)
+        return [dict(row) for row in rows]
+    
+    async def get_expired_invitations(
+        self, conn: asyncpg.Connection, company_id: str
+    ) -> List[Dict[str, Any]]:
+        query = """
+            SELECT * FROM invitations
+            WHERE company_id = $1 AND status = 'pending' AND expires_at < NOW()
+            ORDER BY created_at DESC
+        """
+        rows = await conn.fetch(query, company_id)
+        return [dict(row) for row in rows]
+    
+    async def get_invitation_with_company(
+        self, conn: asyncpg.Connection, invitation_id: str
+    ) -> Optional[Dict[str, Any]]:
+        query = """
+            SELECT 
+                i.*,
+                json_build_object(
+                    'id', c.id,
+                    'name', c.name,
+                    'business_name', c.business_name,
+                    'user_id', c.user_id
+                ) as company
+            FROM invitations i
+            JOIN companies c ON i.company_id = c.id
+            WHERE i.id = $1
+        """
+        row = await conn.fetchrow(query, invitation_id)
+        return dict(row) if row else None
+    
+    async def delete_invitation(self, conn: asyncpg.Connection, invitation_id: str) -> None:
+        query = "DELETE FROM invitations WHERE id = $1"
+        await conn.execute(query, invitation_id)

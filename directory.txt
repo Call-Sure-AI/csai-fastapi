@@ -1,0 +1,60 @@
+Folder PATH listing for volume New Volume
+Volume serial number is 0EE1-AA6D
+D:.
+¦   .env.example
+¦   .gitignore
+¦   config.py
+¦   directory.txt
+¦   README.md
+¦   requirements.txt
+¦   
++---app
+¦   ¦   main.py
+¦   ¦   __init__.py
+¦   ¦   
+¦   +---db
+¦   ¦   ¦   postgres.py
+¦   ¦   ¦   postgres_client.py
+¦   ¦   ¦   
+¦   ¦   +---queries
+¦   ¦           account_queries.py
+¦   ¦           agent_queries.py
+¦   ¦           auth_queries.py
+¦   ¦           company_queries.py
+¦   ¦           conversation_queries.py
+¦   ¦           document_queries.py
+¦   ¦           init.py
+¦   ¦           invitation_queries.py
+¦   ¦           otp_queries.py
+¦   ¦           session_queries.py
+¦   ¦           user_queries.py
+¦   ¦           
+¦   +---models
+¦   ¦       agents.py
+¦   ¦       schemas.py
+¦   ¦       users.py
+¦   ¦       __init__.py
+¦   ¦       
+¦   +---utils
+¦           query_helpers.py
+¦           __init__.py
+¦           
++---handlers
+¦       agent_handler.py
+¦       auth_handler.py
+¦       email_handler.py
+¦       __init__.py
+¦       
++---middleware
+¦       auth_middleware.py
+¦       __init__.py
+¦       
++---routes
+¦       agent.py
+¦       auth.py
+¦       health_check.py
+¦       __init__.py
+¦       
++---scripts
+        __init__.py
+        
