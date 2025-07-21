@@ -7,8 +7,11 @@ from app.models.agents import AgentCreate, AgentUpdate, AgentResponse
 class AgentHandler:
     @staticmethod
     async def get_all(user_id: str):
+        print(f'Getting agents for user {user_id}')
         query, params = AgentQueries.get_agents_by_user_id_params(user_id)
+        print(f'Query: {query}')
         agents = postgres_client.client.execute_query(query, params)
+        print(f'Agents: {agents}')
         return [AgentResponse(**agent) for agent in agents]
 
     @staticmethod
