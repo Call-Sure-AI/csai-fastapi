@@ -1,6 +1,7 @@
 from fastapi import FastAPI
 from routes.health_check import router as health_check_router
 from routes.auth import router as auth_router
+from routes.agent import router as agent_router
 from fastapi.middleware.cors import CORSMiddleware
 
 app = FastAPI(title="Callsure AI - Fast API", description="A FastAPI project for Callsure AI")
@@ -15,6 +16,7 @@ app.add_middleware(
 
 app.include_router(health_check_router)
 app.include_router(auth_router)
+app.include_router(agent_router)
 
 @app.get("/")
 async def root():

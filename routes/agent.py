@@ -1,5 +1,5 @@
 from fastapi import APIRouter, Depends, status
-from app.models.schemas import AgentCreate, AgentUpdate, AgentResponse
+from app.models.agents import AgentCreate, AgentUpdate, AgentResponse
 from handlers.agent_handler import AgentHandler
 from middleware.auth_middleware import get_current_user
 from app.models.schemas import UserResponse

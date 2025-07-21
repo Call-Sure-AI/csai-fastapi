@@ -2,7 +2,7 @@ import uuid
 from fastapi import HTTPException, status
 from app.db.postgres_client import postgres_client
 from app.db.queries.agent_queries import AgentQueries
-from app.models.schemas import AgentCreate, AgentUpdate, AgentResponse
+from app.models.agents import AgentCreate, AgentUpdate, AgentResponse
 
 class AgentHandler:
     @staticmethod
