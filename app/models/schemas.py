@@ -1,6 +1,6 @@
 import uuid
 from pydantic import BaseModel, Field, EmailStr, HttpUrl, validator
-from typing import Optional, Dict, List, Any
+from typing import Optional, Dict, List, Any, Literal
 from datetime import datetime
 import re
 from enum import Enum
@@ -306,3 +306,34 @@ class S3BulkOperationResult(BaseModel):
     successful_operations: int
     failed_operations: int
     results: List[Dict[str, Any]]
+
+class WhatsAppOnboardRequest(BaseModel):
+    business_id: str
+    status: Literal["FINISH", "CANCEL"]
+    waba_id: Optional[str] = None
+    phone_number_id: Optional[str] = None
+    code: Optional[str] = None
+    current_step: Optional[str] = None
+
+class WhatsAppMessageRequest(BaseModel):
+    to: str             # Recipient phone number
+    message: str        # Text message
+    type: str = "text"  # Optional, default to text; could extend to templates, media
+
+class SendMessageRequest(BaseModel):
+    to: str         # recipient phone number
+    message: str    # message text
+    type: str = "text"
+
+class SendMessageResponse(BaseModel):
+    message_id: str
+    status: str
+    to: str
+
+class SendMessageResponse(BaseModel):
+    message_id: str      # Unique message ID returned by WhatsApp API
+    status: str          # e.g., "sent", "failed", "queued"
+    to: str              # Recipient phone number
+
+    class Config:
+        orm_mode = True  # Allows ORM objects (SQLAlchemy) to be serialized
