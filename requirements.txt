@@ -1,26 +1,10 @@
-<<<<<<< Updated upstream
-fastapi==0.115.5
-uvicorn[standard]==0.32.1
-=======
 fastapi[standard]==0.116.1
 uvicorn[standard]==0.21.1
->>>>>>> Stashed changes
 sqlalchemy==2.0.36
 pydantic==2.11.7
 pydantic-settings==2.10.1
 python-dotenv==1.0.1
 email-validator==2.2.0
-<<<<<<< Updated upstream
-psycopg2-binary==2.9.10
-pyjwt==2.10.1
-google-auth==2.36.0
-google-auth-oauthlib==1.2.1
-aiosmtplib==3.0.2
-bcrypt==4.2.1
-python-multipart==0.0.18
-boto3==1.35.95
-botocore==1.35.95
-=======
 psycopg2-binary>=2.9
 PyJWT==2.8.0
 google-auth==2.23.3
@@ -30,5 +14,4 @@ aiosmtplib==1.1.6
 python-multipart>=0.0.18,<0.0.22
 boto3==1.28.61
 botocore==1.31.61
->>>>>>> Stashed changes
 asyncpg==0.30.0
