@@ -1,4 +1,13 @@
 from fastapi import FastAPI, Request
+from routes.health_check import router as health_check_router
+from routes.auth import router as auth_router
+from routes.agent import router as agent_router
+from routes.company import router as company_router
+#from routes.conversation import conversation_router
+#from routes.customer import customer_router
+from routes.email import router as email_router
+from routes.invitation import router as invitation_router
+from routes.s3 import router as s3_router
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.trustedhost import TrustedHostMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
@@ -98,8 +107,15 @@ app.add_middleware(
     expose_headers=["*"],
 )
 
-# Add compression for responses
 app.add_middleware(GZipMiddleware, minimum_size=1000)
+app.include_router(health_check_router)
+app.include_router(auth_router)
+app.include_router(agent_router)
+app.include_router(company_router)
+#app.include_router(customer_router)
+app.include_router(email_router)
+app.include_router(invitation_router)
+app.include_router(s3_router)
 
 # Add trusted host middleware for security in production
 if IS_PRODUCTION:
