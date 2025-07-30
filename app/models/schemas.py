@@ -1,6 +1,6 @@
 import uuid
-from pydantic import BaseModel, Field, EmailStr, HttpUrl, validator
-from typing import Optional, Dict, List, Any
+from pydantic import BaseModel, Field, EmailStr, HttpUrl, validator, field_validator
+from typing import Optional, Dict, List, Any, Literal
 from datetime import datetime
 import re
 from enum import Enum
@@ -306,3 +306,232 @@ class S3BulkOperationResult(BaseModel):
     successful_operations: int
     failed_operations: int
     results: List[Dict[str, Any]]
+
+# ========================
+# WhatsApp Schemas - Updated with proper Pydantic v2 validators
+# ========================
+
+class WhatsAppOnboardRequest(BaseModel):
+    business_id: str
+    status: Literal["FINISH", "CANCEL"]
+    waba_id: Optional[str] = None
+    phone_number_id: Optional[str] = None
+    code: Optional[str] = None
+    current_step: Optional[str] = None
+
+    @field_validator('business_id')
+    @classmethod
+    def validate_business_id(cls, v: str) -> str:
+        if not v or not v.strip():
+            raise ValueError('Business ID cannot be empty')
+        return v.strip()
+
+class WhatsAppMessageRequest(BaseModel):
+    """Base message request schema"""
+    to: str             # Recipient phone number
+    message: str        # Text message content
+    type: str = "text"  # Message type (text, template, media, etc.)
+    business_id: Optional[str] = None  # Business ID for routing
+
+    @field_validator('to')
+    @classmethod
+    def validate_phone_number(cls, v: str) -> str:
+        # Remove any whitespace
+        v = v.strip()
+        
+        # Basic phone number validation
+        # Should start with + and contain 10-15 digits
+        if not re.match(r'^\+\d{10,15}$', v):
+            # Try to fix common formats
+            if v.startswith('00'):
+                v = '+' + v[2:]
+            elif not v.startswith('+') and v.isdigit():
+                # Assume it needs a + prefix
+                v = '+' + v
+            else:
+                raise ValueError('Phone number must be in format +1234567890 (10-15 digits)')
+        
+        return v
+
+    @field_validator('message')
+    @classmethod
+    def validate_message(cls, v: str) -> str:
+        if not v or not v.strip():
+            raise ValueError('Message content cannot be empty')
+        
+        # WhatsApp message length limit
+        if len(v) > 4096:
+            raise ValueError('Message too long (max 4096 characters)')
+        
+        return v.strip()
+
+class SendMessageRequest(WhatsAppMessageRequest):
+    """Extended message request for API endpoints"""
+    business_id: str  # Make business_id required for API calls
+    
+    # Additional optional fields for advanced messaging
+    preview_url: Optional[bool] = True  # Enable URL previews
+    context: Optional[Dict[str, str]] = None  # For replying to messages
+
+class SendMessageResponse(BaseModel):
+    """Response after sending a WhatsApp message"""
+    message_id: str      # Unique message ID returned by WhatsApp API
+    status: str          # e.g., "sent", "failed", "queued", "rate_limited", "unauthorized"
+    to: str              # Recipient phone number
+    error_message: Optional[str] = None  # Error details if status is failed
+
+    class Config:
+        from_attributes = True  # Updated for Pydantic v2
+
+class WhatsAppTemplateMessage(BaseModel):
+    """Schema for WhatsApp template messages"""
+    to: str
+    business_id: str
+    template_name: str
+    language_code: str = "en"  # Default to English
+    components: Optional[List[Dict[str, Any]]] = None  # Template parameters
+
+    @field_validator('to')
+    @classmethod
+    def validate_phone_number(cls, v: str) -> str:
+        v = v.strip()
+        if not re.match(r'^\+\d{10,15}$', v):
+            if v.startswith('00'):
+                v = '+' + v[2:]
+            elif not v.startswith('+') and v.isdigit():
+                v = '+' + v
+            else:
+                raise ValueError('Phone number must be in format +1234567890')
+        return v
+
+class WhatsAppMediaMessage(BaseModel):
+    """Schema for WhatsApp media messages (images, documents, etc.)"""
+    to: str
+    business_id: str
+    media_type: Literal["image", "document", "audio", "video"]
+    media_url: Optional[str] = None  # URL to media file
+    media_id: Optional[str] = None   # WhatsApp media ID (if uploaded to WhatsApp)
+    caption: Optional[str] = None    # Caption for media
+    filename: Optional[str] = None   # For documents
+
+    @field_validator('to')
+    @classmethod
+    def validate_phone_number(cls, v: str) -> str:
+        v = v.strip()
+        if not re.match(r'^\+\d{10,15}$', v):
+            if v.startswith('00'):
+                v = '+' + v[2:]
+            elif not v.startswith('+') and v.isdigit():
+                v = '+' + v
+            else:
+                raise ValueError('Phone number must be in format +1234567890')
+        return v
+
+    def __init__(self, **data):
+        super().__init__(**data)
+        # Custom validation that requires access to multiple fields
+        if not self.media_url and not self.media_id:
+            raise ValueError('Either media_url or media_id must be provided')
+
+class BulkMessageRequest(BaseModel):
+    """Schema for sending bulk WhatsApp messages"""
+    business_id: str
+    recipients: List[str]  # List of phone numbers
+    message: str
+    type: str = "text"
+    
+    @field_validator('recipients')
+    @classmethod
+    def validate_recipients(cls, v: List[str]) -> List[str]:
+        if len(v) > 100:  # Limit bulk messages
+            raise ValueError('Maximum 100 recipients allowed per bulk message')
+        
+        validated_numbers = []
+        for phone in v:
+            phone = phone.strip()
+            if not re.match(r'^\+\d{10,15}$', phone):
+                if phone.startswith('00'):
+                    phone = '+' + phone[2:]
+                elif not phone.startswith('+') and phone.isdigit():
+                    phone = '+' + phone
+                else:
+                    raise ValueError(f'Invalid phone number format: {phone}')
+            validated_numbers.append(phone)
+        
+        return validated_numbers
+
+class BulkMessageResponse(BaseModel):
+    """Response for bulk message sending"""
+    total_messages: int
+    successful: int
+    failed: int
+    results: List[SendMessageResponse]
+
+class WhatsAppWebhookMessage(BaseModel):
+    """Schema for incoming WhatsApp webhook messages"""
+    id: str
+    from_: str = Field(alias="from")  # 'from' is a Python keyword
+    timestamp: str
+    type: str
+    text: Optional[Dict[str, str]] = None
+    image: Optional[Dict[str, Any]] = None
+    document: Optional[Dict[str, Any]] = None
+    audio: Optional[Dict[str, Any]] = None
+    video: Optional[Dict[str, Any]] = None
+    context: Optional[Dict[str, str]] = None  # For message replies
+
+class WhatsAppWebhookStatus(BaseModel):
+    """Schema for WhatsApp message status updates"""
+    id: str  # Message ID
+    status: str  # sent, delivered, read, failed
+    timestamp: str
+    recipient_id: str
+    conversation: Optional[Dict[str, Any]] = None
+    pricing: Optional[Dict[str, Any]] = None
+
+class WhatsAppWebhookEntry(BaseModel):
+    """Schema for WhatsApp webhook entry"""
+    id: str  # WhatsApp Business Account ID
+    changes: List[Dict[str, Any]]
+
+class WhatsAppWebhookPayload(BaseModel):
+    """Schema for complete WhatsApp webhook payload"""
+    object: str  # Should be "whatsapp_business_account"
+    entry: List[WhatsAppWebhookEntry]
+
+class WhatsAppStatusResponse(BaseModel):
+    """Schema for WhatsApp business status response"""
+    business_id: str
+    status: str  # FINISH, CANCEL, PENDING, etc.
+    current_step: Optional[str] = None
+    waba_id: Optional[str] = None
+    phone_number_id: Optional[str] = None
+    has_token: bool = False
+    created_at: datetime
+    updated_at: datetime
+
+class WhatsAppBusinessInfo(BaseModel):
+    """Schema for WhatsApp Business Account information"""
+    id: str
+    name: str
+    currency: Optional[str] = None
+    timezone_id: Optional[str] = None
+    message_template_namespace: Optional[str] = None
+
+class WhatsAppPhoneNumberInfo(BaseModel):
+    """Schema for WhatsApp Phone Number information"""
+    id: str
+    display_phone_number: str
+    verified_name: str
+    code_verification_status: str
+    quality_rating: Optional[str] = None
+
+# Webhook verification
+class WhatsAppWebhookVerification(BaseModel):
+    """Schema for webhook verification"""
+    hub_mode: str = Field(alias="hub.mode")
+    hub_verify_token: str = Field(alias="hub.verify_token") 
+    hub_challenge: str = Field(alias="hub.challenge")
+
+    class Config:
+        allow_population_by_field_name = True
