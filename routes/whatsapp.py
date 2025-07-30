@@ -14,7 +14,8 @@ from app.models.schemas import (
     BulkMessageResponse,
     WhatsAppStatusResponse,
     WhatsAppWebhookPayload,
-    MessageResponse
+    MessageResponse,
+    UserResponse  # Import the UserResponse type
 )
 from middleware.auth_middleware import get_current_user
 import logging
@@ -30,7 +31,7 @@ handler = WhatsAppHandler()
 async def onboard_whatsapp(
     data: WhatsAppOnboardRequest,
     db: AsyncSession = Depends(get_db_connection),
-    current_user: dict = Depends(get_current_user)
+    current_user: UserResponse = Depends(get_current_user)  # Type hint fixed
 ):
     """
     Onboard a WhatsApp Business Account
@@ -43,7 +44,8 @@ async def onboard_whatsapp(
     - **current_step**: Current step in onboarding process
     """
     try:
-        logger.info(f"Onboarding request from user {current_user.get('id')} for business {data.business_id}")
+        # Fixed: Access attribute directly instead of using .get()
+        logger.info(f"Onboarding request from user {current_user.id} for business {data.business_id}")
         result = await handler.onboard(db, data)
         
         if "error" in result:
@@ -61,7 +63,7 @@ async def onboard_whatsapp(
 async def send_message(
     payload: SendMessageRequest,
     db: AsyncSession = Depends(get_db_connection),
-    current_user: dict = Depends(get_current_user)
+    current_user: UserResponse = Depends(get_current_user)  # Type hint fixed
 ):
     """
     Send a WhatsApp text message
@@ -74,7 +76,8 @@ async def send_message(
     - **context**: Context for replying to messages (optional)
     """
     try:
-        logger.info(f"Send message request from user {current_user.get('id')} to {payload.to}")
+        # Fixed: Access attribute directly instead of using .get()
+        logger.info(f"Send message request from user {current_user.id} to {payload.to}")
         result = await handler.send_message_advanced(db, payload)
         
         if result.status == "failed":
@@ -92,7 +95,7 @@ async def send_message(
 async def send_template_message(
     payload: WhatsAppTemplateMessage,
     db: AsyncSession = Depends(get_db_connection),
-    current_user: dict = Depends(get_current_user)
+    current_user: UserResponse = Depends(get_current_user)  # Type hint fixed
 ):
     """
     Send a WhatsApp template message
@@ -104,7 +107,8 @@ async def send_template_message(
     - **components**: Template parameters (optional)
     """
     try:
-        logger.info(f"Send template message request from user {current_user.get('id')}")
+        # Fixed: Access attribute directly instead of using .get()
+        logger.info(f"Send template message request from user {current_user.id}")
         result = await handler.send_template_message(db, payload)
         
         if result.status == "failed":
@@ -122,7 +126,7 @@ async def send_template_message(
 async def send_media_message(
     payload: WhatsAppMediaMessage,
     db: AsyncSession = Depends(get_db_connection),
-    current_user: dict = Depends(get_current_user)
+    current_user: UserResponse = Depends(get_current_user)  # Type hint fixed
 ):
     """
     Send a WhatsApp media message (image, document, audio, video)
@@ -136,7 +140,8 @@ async def send_media_message(
     - **filename**: Filename for documents (optional)
     """
     try:
-        logger.info(f"Send media message request from user {current_user.get('id')}")
+        # Fixed: Access attribute directly instead of using .get()
+        logger.info(f"Send media message request from user {current_user.id}")
         result = await handler.send_media_message(db, payload)
         
         if result.status == "failed":
@@ -154,7 +159,7 @@ async def send_media_message(
 async def send_bulk_messages(
     payload: BulkMessageRequest,
     db: AsyncSession = Depends(get_db_connection),
-    current_user: dict = Depends(get_current_user)
+    current_user: UserResponse = Depends(get_current_user)  # Type hint fixed
 ):
     """
     Send bulk WhatsApp messages
@@ -165,7 +170,8 @@ async def send_bulk_messages(
     - **type**: Message type (default: "text")
     """
     try:
-        logger.info(f"Send bulk messages request from user {current_user.get('id')} to {len(payload.recipients)} recipients")
+        # Fixed: Access attribute directly instead of using .get()
+        logger.info(f"Send bulk messages request from user {current_user.id} to {len(payload.recipients)} recipients")
         result = await handler.send_bulk_messages(db, payload)
         
         return result
@@ -178,7 +184,7 @@ async def send_bulk_messages(
 async def get_whatsapp_status(
     business_id: str,
     db: AsyncSession = Depends(get_db_connection),
-    current_user: dict = Depends(get_current_user)
+    current_user: UserResponse = Depends(get_current_user)  # Type hint fixed
 ):
     """
     Get WhatsApp onboarding status for a business
@@ -186,7 +192,8 @@ async def get_whatsapp_status(
     - **business_id**: Business ID to check status for
     """
     try:
-        logger.info(f"Status check request from user {current_user.get('id')} for business {business_id}")
+        # Fixed: Access attribute directly instead of using .get()
+        logger.info(f"Status check request from user {current_user.id} for business {business_id}")
         result = await handler.get_business_status(db, business_id)
         
         if not result:
@@ -203,7 +210,7 @@ async def get_whatsapp_status(
 @router.get("/businesses")
 async def list_whatsapp_businesses(
     db: AsyncSession = Depends(get_db_connection),
-    current_user: dict = Depends(get_current_user),
+    current_user: UserResponse = Depends(get_current_user),  # Type hint fixed
     limit: int = Query(default=50, le=100),
     offset: int = Query(default=0, ge=0)
 ):
@@ -216,7 +223,8 @@ async def list_whatsapp_businesses(
     try:
         from sqlalchemy import text
         
-        logger.info(f"List businesses request from user {current_user.get('id')}")
+        # Fixed: Access attribute directly instead of using .get()
+        logger.info(f"List businesses request from user {current_user.id}")
         
         query = text("""
             SELECT business_id, waba_id, phone_number_id, status, current_step,
@@ -257,7 +265,7 @@ async def list_whatsapp_businesses(
 async def delete_whatsapp_business(
     business_id: str,
     db: AsyncSession = Depends(get_db_connection),
-    current_user: dict = Depends(get_current_user)
+    current_user: UserResponse = Depends(get_current_user)  # Type hint fixed
 ):
     """
     Delete a WhatsApp business configuration
@@ -267,7 +275,8 @@ async def delete_whatsapp_business(
     try:
         from sqlalchemy import text
         
-        logger.info(f"Delete business request from user {current_user.get('id')} for business {business_id}")
+        # Fixed: Access attribute directly instead of using .get()
+        logger.info(f"Delete business request from user {current_user.id} for business {business_id}")
         
         # Check if business exists
         check_query = text("SELECT business_id FROM whatsapp_clients WHERE business_id = :business_id")
@@ -383,13 +392,14 @@ async def health_check():
 # Configuration endpoints
 @router.get("/config")
 async def get_whatsapp_config(
-    current_user: dict = Depends(get_current_user)
+    current_user: UserResponse = Depends(get_current_user)  # Type hint fixed
 ):
     """
     Get WhatsApp configuration for the current user
     """
     try:
-        logger.info(f"Config request from user {current_user.get('id')}")
+        # Fixed: Access attribute directly instead of using .get()
+        logger.info(f"Config request from user {current_user.id}")
         
         return {
             "facebook_app_id": handler.fb_app_id,
@@ -413,7 +423,7 @@ async def get_whatsapp_config(
 async def test_whatsapp_connection(
     business_id: str,
     db: AsyncSession = Depends(get_db_connection),
-    current_user: dict = Depends(get_current_user)
+    current_user: UserResponse = Depends(get_current_user)  # Type hint fixed
 ):
     """
     Test WhatsApp connection for a business
@@ -421,7 +431,8 @@ async def test_whatsapp_connection(
     - **business_id**: Business ID to test connection for
     """
     try:
-        logger.info(f"Test connection request from user {current_user.get('id')} for business {business_id}")
+        # Fixed: Access attribute directly instead of using .get()
+        logger.info(f"Test connection request from user {current_user.id} for business {business_id}")
         
         # Get business status
         status = await handler.get_business_status(db, business_id)
