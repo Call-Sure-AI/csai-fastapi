@@ -1,5 +1,5 @@
 import uuid
-from pydantic import BaseModel, Field, EmailStr, HttpUrl, validator, field_validator
+from pydantic import BaseModel, Field, EmailStr, HttpUrl, field_validator
 from typing import Optional, Dict, List, Any, Literal
 from datetime import datetime
 import re
@@ -144,8 +144,9 @@ class CompanyBase(BaseModel):
     phone_number: Optional[str] = None
     settings: Optional[CompanySettings] = None
     
-    @validator('phone_number')
-    def validate_phone_number(cls, v):
+    @field_validator('phone_number')
+    @classmethod  # <- ADD @classmethod decorator
+    def validate_phone_number(cls, v):  # <- Use 'cls' not 'self'
         if v is not None:
             pattern = r'^\+?[1-9]\d{1,19}$'
             if not re.match(pattern, v):
@@ -334,8 +335,8 @@ class WhatsAppMessageRequest(BaseModel):
     business_id: Optional[str] = None  # Business ID for routing
 
     @field_validator('to')
-    @classmethod
-    def validate_phone_number(cls, v: str) -> str:
+    @classmethod  # <- ADD @classmethod decorator
+    def validate_phone_number(cls, v: str) -> str:  # <- Use 'cls' not 'self'
         # Remove any whitespace
         v = v.strip()
         
@@ -354,8 +355,8 @@ class WhatsAppMessageRequest(BaseModel):
         return v
 
     @field_validator('message')
-    @classmethod
-    def validate_message(cls, v: str) -> str:
+    @classmethod  # <- ADD @classmethod decorator
+    def validate_message(cls, v: str) -> str:  # <- Use 'cls' not 'self'
         if not v or not v.strip():
             raise ValueError('Message content cannot be empty')
         
@@ -392,8 +393,8 @@ class WhatsAppTemplateMessage(BaseModel):
     components: Optional[List[Dict[str, Any]]] = None  # Template parameters
 
     @field_validator('to')
-    @classmethod
-    def validate_phone_number(cls, v: str) -> str:
+    @classmethod  # <- ADD @classmethod decorator
+    def validate_phone_number(cls, v: str) -> str:  # <- Use 'cls' not 'self'
         v = v.strip()
         if not re.match(r'^\+\d{10,15}$', v):
             if v.startswith('00'):
@@ -427,9 +428,9 @@ class WhatsAppMediaMessage(BaseModel):
                 raise ValueError('Phone number must be in format +1234567890')
         return v
 
-    def __init__(self, **data):
-        super().__init__(**data)
-        # Custom validation that requires access to multiple fields
+    def model_post_init(self, __context: Any) -> None:
+        """Custom validation that requires access to multiple fields"""
+        # Fixed: Added the required __context parameter
         if not self.media_url and not self.media_id:
             raise ValueError('Either media_url or media_id must be provided')
 
@@ -441,8 +442,8 @@ class BulkMessageRequest(BaseModel):
     type: str = "text"
     
     @field_validator('recipients')
-    @classmethod
-    def validate_recipients(cls, v: List[str]) -> List[str]:
+    @classmethod  # <- ADD @classmethod decorator
+    def validate_recipients(cls, v: List[str]) -> List[str]:  # <- Use 'cls' not 'self'
         if len(v) > 100:  # Limit bulk messages
             raise ValueError('Maximum 100 recipients allowed per bulk message')
         
