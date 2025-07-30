@@ -20,12 +20,14 @@ from app.models.schemas import (
 from middleware.auth_middleware import get_current_user
 import logging
 import os
+from utils.whatsapp_onboarding_helper import WhatsAppOnboardingHelper
 
 # Set up logging
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/whatsapp", tags=["whatsapp"])
 handler = WhatsAppHandler()
+onboarding_helper = WhatsAppOnboardingHelper()
 
 @router.post("/onboard")
 async def onboard_whatsapp(
@@ -58,6 +60,90 @@ async def onboard_whatsapp(
     except Exception as e:
         logger.error(f"Unexpected error in onboard_whatsapp: {str(e)}")
         raise HTTPException(status_code=500, detail="Internal server error")
+
+@router.post("/start-onboarding")
+async def start_onboarding(
+    business_id: str = Query(..., description="Business ID for onboarding"),
+    current_user: UserResponse = Depends(get_current_user)
+):
+    """
+    Start a new WhatsApp onboarding session
+    
+    - **business_id**: Business ID to start onboarding for
+    """
+    try:
+        logger.info(f"Starting onboarding session for user {current_user.id}, business {business_id}")
+        
+        session = onboarding_helper.create_onboarding_session(
+            business_id, 
+            current_user.id
+        )
+        
+        return session
+        
+    except Exception as e:
+        logger.error(f"Error starting onboarding session: {str(e)}")
+        raise HTTPException(status_code=500, detail="Failed to start onboarding session")
+
+@router.get("/troubleshooting")
+async def get_troubleshooting_guide():
+    """
+    Get troubleshooting guide for onboarding issues
+    """
+    try:
+        return onboarding_helper.get_troubleshooting_guide()
+    except Exception as e:
+        logger.error(f"Error getting troubleshooting guide: {str(e)}")
+        raise HTTPException(status_code=500, detail="Failed to get troubleshooting guide")
+
+@router.get("/onboarding-status/{business_id}")
+async def get_onboarding_status(
+    business_id: str,
+    current_user: UserResponse = Depends(get_current_user)
+):
+    """
+    Get detailed onboarding status with next steps
+    
+    - **business_id**: Business ID to check
+    """
+    try:
+        logger.info(f"Getting onboarding status for user {current_user.id}, business {business_id}")
+        
+        # Get basic status
+        status = await handler.get_business_status(db, business_id)
+        
+        if not status:
+            # No record found, provide onboarding URL
+            session = onboarding_helper.create_onboarding_session(business_id, current_user.id)
+            return {
+                "business_id": business_id,
+                "status": "not_started",
+                "onboarding_required": True,
+                "next_steps": session
+            }
+        
+        # Check if onboarding is complete
+        if status.get("status") == "FINISH" and status.get("has_token"):
+            return {
+                "business_id": business_id,
+                "status": "completed",
+                "onboarding_required": False,
+                "details": status
+            }
+        
+        # Onboarding incomplete or failed
+        session = onboarding_helper.create_onboarding_session(business_id, current_user.id)
+        return {
+            "business_id": business_id,
+            "status": "incomplete",
+            "onboarding_required": True,
+            "current_details": status,
+            "next_steps": session
+        }
+        
+    except Exception as e:
+        logger.error(f"Error getting onboarding status: {str(e)}")
+        raise HTTPException(status_code=500, detail="Failed to get onboarding status")
 
 @router.post("/send-message", response_model=SendMessageResponse)
 async def send_message(

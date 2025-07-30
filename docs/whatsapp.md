@@ -413,3 +413,355 @@ curl -X GET "${BASE_URL}/whatsapp/config" \
 #   "to": "+1234567890",
 #   "error_message": "Rate limit exceeded"
 # }
+
+
+
+
+
+# WhatsApp API cURL Commands
+# Replace YOUR_JWT_TOKEN with your actual authentication token
+# Replace localhost:8000 with your actual server URL
+
+# ===============================
+# 1. START ONBOARDING SESSION
+# ===============================
+curl -X POST "http://localhost:8000/whatsapp/start-onboarding" \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer YOUR_JWT_TOKEN" \
+  -d '{
+    "business_id": "123456789"
+  }'
+
+# ===============================
+# 2. ONBOARD WHATSAPP BUSINESS
+# ===============================
+
+# Complete onboarding (after getting code from Facebook callback)
+curl -X POST "http://localhost:8000/whatsapp/onboard" \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer YOUR_JWT_TOKEN" \
+  -d '{
+    "business_id": "779780474518975",
+    "status": "FINISH",
+    "code": "AQBmH7ZQR...", 
+    "waba_id": "123456789012345",
+    "phone_number_id": "987654321098765",
+    "current_step": "completed"
+  }'
+
+# Cancel onboarding
+curl -X POST "http://localhost:8000/whatsapp/onboard" \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer YOUR_JWT_TOKEN" \
+  -d '{
+    "business_id": "779780474518975",
+    "status": "CANCEL",
+    "current_step": "cancelled"
+  }'
+
+# ===============================
+# 3. SEND MESSAGES
+# ===============================
+
+# Send simple text message
+curl -X POST "http://localhost:8000/whatsapp/send-message" \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer YOUR_JWT_TOKEN" \
+  -d '{
+    "business_id": "779780474518975",
+    "to": "+1234567890",
+    "message": "Hello! This is a test message from WhatsApp Business API.",
+    "type": "text",
+    "preview_url": true
+  }'
+
+# Send message with context (reply to another message)
+curl -X POST "http://localhost:8000/whatsapp/send-message" \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer YOUR_JWT_TOKEN" \
+  -d '{
+    "business_id": "779780474518975",
+    "to": "+1234567890",
+    "message": "This is a reply to your previous message.",
+    "type": "text",
+    "context": {
+      "message_id": "wamid.HBgNMTIzNDU2Nzg5MAkRejoK..."
+    }
+  }'
+
+# ===============================
+# 4. SEND TEMPLATE MESSAGE
+# ===============================
+
+# Send simple template (no parameters)
+curl -X POST "http://localhost:8000/whatsapp/send-template" \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer YOUR_JWT_TOKEN" \
+  -d '{
+    "business_id": "779780474518975",
+    "to": "+1234567890",
+    "template_name": "hello_world",
+    "language_code": "en"
+  }'
+
+# Send template with parameters
+curl -X POST "http://localhost:8000/whatsapp/send-template" \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer YOUR_JWT_TOKEN" \
+  -d '{
+    "business_id": "779780474518975",
+    "to": "+1234567890",
+    "template_name": "order_confirmation",
+    "language_code": "en",
+    "components": [
+      {
+        "type": "body",
+        "parameters": [
+          {
+            "type": "text",
+            "text": "John Doe"
+          },
+          {
+            "type": "text", 
+            "text": "12345"
+          }
+        ]
+      }
+    ]
+  }'
+
+# ===============================
+# 5. SEND MEDIA MESSAGES
+# ===============================
+
+# Send image with URL
+curl -X POST "http://localhost:8000/whatsapp/send-media" \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer YOUR_JWT_TOKEN" \
+  -d '{
+    "business_id": "779780474518975",
+    "to": "+1234567890",
+    "media_type": "image",
+    "media_url": "https://example.com/image.jpg",
+    "caption": "Check out this amazing image!"
+  }'
+
+# Send document with media ID
+curl -X POST "http://localhost:8000/whatsapp/send-media" \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer YOUR_JWT_TOKEN" \
+  -d '{
+    "business_id": "779780474518975",
+    "to": "+1234567890",
+    "media_type": "document",
+    "media_id": "1234567890",
+    "filename": "invoice.pdf",
+    "caption": "Your invoice is attached."
+  }'
+
+# Send audio file
+curl -X POST "http://localhost:8000/whatsapp/send-media" \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer YOUR_JWT_TOKEN" \
+  -d '{
+    "business_id": "779780474518975",
+    "to": "+1234567890",
+    "media_type": "audio",
+    "media_url": "https://example.com/audio.mp3"
+  }'
+
+# Send video
+curl -X POST "http://localhost:8000/whatsapp/send-media" \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer YOUR_JWT_TOKEN" \
+  -d '{
+    "business_id": "779780474518975",
+    "to": "+1234567890",
+    "media_type": "video",
+    "media_url": "https://example.com/video.mp4",
+    "caption": "Watch this amazing video!"
+  }'
+
+# ===============================
+# 6. SEND BULK MESSAGES
+# ===============================
+
+# Send bulk messages to multiple recipients
+curl -X POST "http://localhost:8000/whatsapp/send-bulk" \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer YOUR_JWT_TOKEN" \
+  -d '{
+    "business_id": "779780474518975",
+    "recipients": [
+      "+1234567890",
+      "+1987654321",
+      "+1555666777"
+    ],
+    "message": "📢 Important announcement: Our store is having a 50% off sale this weekend!",
+    "type": "text"
+  }'
+
+# ===============================
+# 7. STATUS AND MANAGEMENT
+# ===============================
+
+# Get business onboarding status
+curl -X GET "http://localhost:8000/whatsapp/status/779780474518975" \
+  -H "Authorization: Bearer YOUR_JWT_TOKEN"
+
+# List all WhatsApp businesses
+curl -X GET "http://localhost:8000/whatsapp/businesses?limit=10&offset=0" \
+  -H "Authorization: Bearer YOUR_JWT_TOKEN"
+
+# Delete a business configuration
+curl -X DELETE "http://localhost:8000/whatsapp/business/779780474518975" \
+  -H "Authorization: Bearer YOUR_JWT_TOKEN"
+
+# Test connection for a business
+curl -X POST "http://localhost:8000/whatsapp/test-connection/779780474518975" \
+  -H "Authorization: Bearer YOUR_JWT_TOKEN"
+
+# ===============================
+# 8. CONFIGURATION AND HEALTH
+# ===============================
+
+# Get WhatsApp configuration
+curl -X GET "http://localhost:8000/whatsapp/config" \
+  -H "Authorization: Bearer YOUR_JWT_TOKEN"
+
+# Health check
+curl -X GET "http://localhost:8000/whatsapp/health"
+
+# Get troubleshooting guide
+curl -X GET "http://localhost:8000/whatsapp/troubleshooting"
+
+# ===============================
+# 9. WEBHOOK VERIFICATION (No auth needed)
+# ===============================
+
+# Webhook verification (called by Facebook)
+curl -X GET "http://localhost:8000/whatsapp/webhook?hub.mode=subscribe&hub.verify_token=your_webhook_verify_token&hub.challenge=CHALLENGE_SENT_BY_FACEBOOK"
+
+# ===============================
+# 10. WEBHOOK MESSAGE SIMULATION
+# ===============================
+
+# Simulate incoming webhook message (for testing)
+curl -X POST "http://localhost:8000/whatsapp/webhook" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "object": "whatsapp_business_account",
+    "entry": [
+      {
+        "id": "WHATSAPP_BUSINESS_ACCOUNT_ID",
+        "changes": [
+          {
+            "value": {
+              "messaging_product": "whatsapp",
+              "metadata": {
+                "display_phone_number": "15550199999",
+                "phone_number_id": "123456789"
+              },
+              "messages": [
+                {
+                  "from": "16315551234",
+                  "id": "wamid.HBgNMTYzMTU1NTEyMzQVAgsSFFNQAAGD_x0BAgIOMTYzMTU1NTEyMzQ",
+                  "timestamp": "1669233778", 
+                  "text": {
+                    "body": "Hello! I need help with my order."
+                  },
+                  "type": "text"
+                }
+              ]
+            },
+            "field": "messages"
+          }
+        ]
+      }
+    ]
+  }'
+
+# ===============================
+# ERROR HANDLING EXAMPLES
+# ===============================
+
+# Example: Handle expired authorization code
+# This will return error with new authorization URL
+curl -X POST "http://localhost:8000/whatsapp/onboard" \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer YOUR_JWT_TOKEN" \
+  -d '{
+    "business_id": "779780474518975",
+    "status": "FINISH",
+    "code": "FRESH_CODE_FROM_FACEBOOK",
+    "waba_id": "1408159510459283", 
+    "phone_number_id": "656002207607049",
+    "current_step": "completed"
+  }'
+
+# ===============================
+# BATCH OPERATIONS
+# ===============================
+
+# Send messages to different numbers with different content
+# (You would need to call the API multiple times)
+
+# Message 1
+curl -X POST "http://localhost:8000/whatsapp/send-message" \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer YOUR_JWT_TOKEN" \
+  -d '{
+    "business_id": "779780474518975",
+    "to": "+1234567890",
+    "message": "Hi John! Your order #12345 has been shipped."
+  }' &
+
+# Message 2  
+curl -X POST "http://localhost:8000/whatsapp/send-message" \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer YOUR_JWT_TOKEN" \
+  -d '{
+    "business_id": "779780474518975", 
+    "to": "+1987654321",
+    "message": "Hi Sarah! Thank you for your purchase. Here'\''s your receipt."
+  }' &
+
+# Wait for all background jobs to complete
+wait
+
+# ===============================
+# TESTING WITH DIFFERENT PHONE FORMATS
+# ===============================
+
+# US number
+curl -X POST "http://localhost:8000/whatsapp/send-message" \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer YOUR_JWT_TOKEN" \
+  -d '{"business_id": "779780474518975", "to": "+12345678901", "message": "US number test"}'
+
+# India number  
+curl -X POST "http://localhost:8000/whatsapp/send-message" \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer YOUR_JWT_TOKEN" \
+  -d '{"business_id": "779780474518975", "to": "+919876543210", "message": "India number test"}'
+
+# UK number
+curl -X POST "http://localhost:8000/whatsapp/send-message" \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer YOUR_JWT_TOKEN" \
+  -d '{"business_id": "779780474518975", "to": "+441234567890", "message": "UK number test"}'
+
+# ===============================
+# ENVIRONMENT SETUP COMMANDS
+# ===============================
+
+# Set environment variables for testing
+export WHATSAPP_API_BASE_URL="http://localhost:8000"
+export JWT_TOKEN="YOUR_ACTUAL_JWT_TOKEN_HERE"
+export BUSINESS_ID="779780474518975"
+export TEST_PHONE="+1234567890"
+
+# Then you can use them in commands like:
+# curl -X POST "$WHATSAPP_API_BASE_URL/whatsapp/send-message" \
+#   -H "Authorization: Bearer $JWT_TOKEN" \
+#   -d "{\"business_id\": \"$BUSINESS_ID\", \"to\": \"$TEST_PHONE\", \"message\": \"Hello from script!\"}"

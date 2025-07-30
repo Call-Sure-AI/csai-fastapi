@@ -15,6 +15,8 @@ from app.models.schemas import (
     BulkMessageResponse
 )
 from config import Config
+from utils.whatsapp_onboarding_helper import WhatsAppOnboardingHelper
+
 
 # Set up logging
 logger = logging.getLogger(__name__)
@@ -25,7 +27,8 @@ class WhatsAppHandler:
         self.fb_app_secret = os.getenv('FACEBOOK_APP_SECRET')
         self.facebook_version = Config.FACEBOOK_VERSION
         self.frontend_url = Config.FRONTEND_URL
-        
+        self.onboarding_helper = WhatsAppOnboardingHelper()
+
         # Validate required configuration
         if not self.fb_app_id:
             raise ValueError("FACEBOOK_APP_ID is required but not found in configuration")
@@ -45,17 +48,33 @@ class WhatsAppHandler:
             if payload.status == "FINISH":
                 if not payload.code:
                     logger.error(f"Authorization code missing for business_id: {payload.business_id}")
-                    return {"error": "Authorization code missing"}
+                    return {
+                        "error": "Authorization code missing",
+                        "error_type": "missing_code",
+                        "action_required": "Please restart the WhatsApp onboarding process"
+                    }
 
                 # Exchange code for token
-                access_token = await self.exchange_code_for_token(payload.code)
-                if not access_token:
-                    logger.error(f"Failed to retrieve access token for business_id: {payload.business_id}")
-                    return {"error": "Failed to retrieve access token"}
+                try:
+                    access_token = await self.exchange_code_for_token(payload.code)
+                    if not access_token:
+                        logger.error(f"Failed to retrieve access token for business_id: {payload.business_id}")
+                        return {
+                            "error": "Failed to retrieve access token", 
+                            "error_type": "token_exchange_failed",
+                            "action_required": "Please restart the WhatsApp onboarding process"
+                        }
 
-                await self.save_client(payload, db, access_token=access_token)
-                logger.info(f"Client onboarded successfully for business_id: {payload.business_id}")
-                return {"message": "Client onboarded successfully", "status": "completed"}
+                    await self.save_client(payload, db, access_token=access_token)
+                    logger.info(f"Client onboarded successfully for business_id: {payload.business_id}")
+                    return {"message": "Client onboarded successfully", "status": "completed"}
+                    
+                except FacebookAPIError as e:
+                    logger.error(f"Facebook API error during onboarding for business_id: {payload.business_id}, error: {str(e)}")
+                    return self.onboarding_helper.generate_onboarding_response(
+                        payload.business_id, 
+                        error_type="expired_code"
+                    )
             
             # Handle unknown status
             logger.warning(f"Unknown status '{payload.status}' for business_id: {payload.business_id}")
@@ -82,25 +101,44 @@ class WhatsAppHandler:
             
             async with aiohttp.ClientSession() as session:
                 async with session.get(token_url) as resp:
-                    if resp.status != 200:
-                        error_text = await resp.text()
-                        logger.error(f"Token exchange failed with status {resp.status}: {error_text}")
-                        raise Exception(f"Token exchange failed with status {resp.status}: {error_text}")
+                    response_text = await resp.text()
                     
-                    data = await resp.json()
+                    if resp.status != 200:
+                        logger.error(f"Token exchange failed with status {resp.status}: {response_text}")
+                        
+                        # Try to parse error response
+                        try:
+                            error_data = await resp.json() if resp.content_type == 'application/json' else {"error": {"message": response_text}}
+                        except:
+                            error_data = {"error": {"message": response_text}}
+                        
+                        raise FacebookAPIError.from_response(resp.status, error_data)
+                    
+                    try:
+                        data = await resp.json()
+                    except:
+                        logger.error(f"Failed to parse JSON response: {response_text}")
+                        raise Exception(f"Invalid response format: {response_text}")
                     
                     if 'error' in data:
                         logger.error(f"Facebook API error: {data}")
-                        raise Exception(f"Facebook API error: {data.get('error', {}).get('message', 'Unknown error')}")
+                        raise FacebookAPIError.from_response(resp.status, data)
                     
                     access_token = data.get("access_token")
                     if access_token:
                         logger.info("Successfully obtained access token")
+                        
+                        # Log token expiration info if available
+                        expires_in = data.get("expires_in")
+                        if expires_in:
+                            logger.info(f"Access token expires in {expires_in} seconds")
                     else:
                         logger.error("Access token not found in response")
                     
                     return access_token
                     
+        except FacebookAPIError:
+            raise  # Re-raise Facebook API errors
         except Exception as e:
             logger.error(f"Error exchanging code for token: {str(e)}")
             raise
@@ -548,3 +586,36 @@ class WhatsAppHandler:
         except Exception as e:
             logger.error(f"Error processing webhook message: {str(e)}")
             return {"status": "error", "error": str(e)}
+
+
+class FacebookAPIError(Exception):
+    """Custom exception for Facebook API errors"""
+    
+    def __init__(self, message: str, error_type: str = None, error_code: int = None, error_subcode: int = None):
+        self.message = message
+        self.error_type = error_type
+        self.error_code = error_code
+        self.error_subcode = error_subcode
+        super().__init__(self.message)
+    
+    @classmethod
+    def from_response(cls, status_code: int, response_data: dict):
+        """Create FacebookAPIError from API response"""
+        error_info = response_data.get('error', {})
+        message = error_info.get('message', 'Unknown Facebook API error')
+        error_type = error_info.get('type', 'UnknownError')
+        error_code = error_info.get('code', status_code)
+        error_subcode = error_info.get('error_subcode')
+        
+        return cls(message, error_type, error_code, error_subcode)
+    
+    def get_user_action(self) -> str:
+        """Get user-friendly action based on error type"""
+        if self.error_subcode == 36007:  # Expired authorization code
+            return "The authorization code has expired. Please restart the WhatsApp onboarding process from the beginning."
+        elif self.error_code == 100:  # OAuth errors
+            return "There was an authentication error. Please try the onboarding process again."
+        elif self.error_code == 190:  # Invalid access token
+            return "Your access token is invalid. Please complete the onboarding process again."
+        else:
+            return "Please try the onboarding process again. If the problem persists, contact support."
