@@ -96,9 +96,12 @@ async def get_troubleshooting_guide():
         logger.error(f"Error getting troubleshooting guide: {str(e)}")
         raise HTTPException(status_code=500, detail="Failed to get troubleshooting guide")
 
+# Fixed route - add missing db dependency
+
 @router.get("/onboarding-status/{business_id}")
 async def get_onboarding_status(
     business_id: str,
+    db: AsyncSession = Depends(get_db_connection),  # <- ADD THIS LINE
     current_user: UserResponse = Depends(get_current_user)
 ):
     """
@@ -109,7 +112,7 @@ async def get_onboarding_status(
     try:
         logger.info(f"Getting onboarding status for user {current_user.id}, business {business_id}")
         
-        # Get basic status
+        # Get basic status - now 'db' is defined
         status = await handler.get_business_status(db, business_id)
         
         if not status:
