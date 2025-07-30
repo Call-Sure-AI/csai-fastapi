@@ -56,6 +56,3 @@ async def get_db_connection():
     if not postgres_client._initialized:
         await postgres_client.initialize()
     return postgres_client.client.get_connection()
-
-postgres_client = DatabaseClient()
-
