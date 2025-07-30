@@ -8,6 +8,7 @@ from routes.company import router as company_router
 from routes.email import router as email_router
 from routes.invitation import router as invitation_router
 from routes.s3 import router as s3_router
+from routes.whatsapp import router as whatsapp_router  # ADD THIS LINE!
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.trustedhost import TrustedHostMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
@@ -40,6 +41,7 @@ AI-powered voice calling system for customer service.
 * Multi-agent support
 * Customer context management
 * Call recording and analytics
+* WhatsApp Business API integration
 """
 
 # Get environment
@@ -108,6 +110,8 @@ app.add_middleware(
 )
 
 app.add_middleware(GZipMiddleware, minimum_size=1000)
+
+# Include all routers
 app.include_router(health_check_router)
 app.include_router(auth_router)
 app.include_router(agent_router)
@@ -116,6 +120,7 @@ app.include_router(company_router)
 app.include_router(email_router)
 app.include_router(invitation_router)
 app.include_router(s3_router)
+app.include_router(whatsapp_router)  # This will now work!
 
 # Add trusted host middleware for security in production
 if IS_PRODUCTION:
@@ -184,6 +189,12 @@ async def root() -> Dict[str, Any]:
                 "connected": True,
                 "latency_ms": round(db_latency_ms, 2),
                 "pool": pool_stats,
+            },
+            "features": {
+                "whatsapp": True,
+                "voice_calling": True,
+                "agents": True,
+                "companies": True
             }
         }
     except Exception as e:
@@ -237,6 +248,23 @@ async def health_check() -> Dict[str, Any]:
             "error": str(e)
         }
     
+    # WhatsApp service health check
+    try:
+        # Check if WhatsApp configuration is present
+        from config import Config
+        whatsapp_configured = bool(Config.FACEBOOK_APP_ID)
+        
+        health_status["checks"]["whatsapp"] = {
+            "status": "pass" if whatsapp_configured else "warn",
+            "configured": whatsapp_configured,
+            "facebook_version": Config.FACEBOOK_VERSION if hasattr(Config, 'FACEBOOK_VERSION') else None
+        }
+    except Exception as e:
+        health_status["checks"]["whatsapp"] = {
+            "status": "fail",
+            "error": str(e)
+        }
+    
     return health_status
 
 # Metrics endpoint (for Prometheus, etc.)
@@ -245,6 +273,16 @@ async def metrics() -> str:
     """Prometheus-compatible metrics endpoint"""
     try:
         pool_stats = await postgres_client.client.get_pool_stats()
+        
+        # Get WhatsApp client count
+        whatsapp_clients_count = 0
+        try:
+            result = await postgres_client.client.execute_query_one(
+                "SELECT COUNT(*) as count FROM whatsapp_clients"
+            )
+            whatsapp_clients_count = result["count"] if result else 0
+        except:
+            pass
         
         metrics_data = [
             f'# HELP db_pool_size Current size of the database connection pool',
@@ -258,6 +296,10 @@ async def metrics() -> str:
             f'# HELP db_pool_used Used connections in the pool',
             f'# TYPE db_pool_used gauge',
             f'db_pool_used {pool_stats.get("used_connections", 0)}',
+            f'',
+            f'# HELP whatsapp_clients_total Total number of WhatsApp clients',
+            f'# TYPE whatsapp_clients_total gauge',
+            f'whatsapp_clients_total {whatsapp_clients_count}',
         ]
         
         return "\n".join(metrics_data)
@@ -290,6 +332,7 @@ async def startup_message():
     🌐 API Docs: http://localhost:8000/api/docs
     📊 Metrics: http://localhost:8000/metrics
     💚 Health: http://localhost:8000/health
+    📱 WhatsApp: http://localhost:8000/whatsapp/health
     """)
 
 # For running with uvicorn directly
