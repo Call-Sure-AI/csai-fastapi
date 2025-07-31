@@ -161,13 +161,22 @@ class CompanyBase(BaseModel):
     settings: Optional[CompanySettings] = None
     
     @field_validator('phone_number')
-    @classmethod  # <- ADD @classmethod decorator
-    def validate_phone_number(cls, v):  # <- Use 'cls' not 'self'
+    @classmethod
+    def validate_phone_number(cls, v):
         if v is not None:
             pattern = r'^\+?[1-9]\d{1,19}$'
             if not re.match(pattern, v):
                 raise ValueError('Invalid phone number format')
         return v
+    
+    def to_db_dict(self) -> Dict[str, Any]:
+        """Convert to dictionary suitable for database operations"""
+        data = self.model_dump()
+
+        if data.get('website'):
+            data['website'] = str(data['website'])
+            
+        return data
 
 class CompanyCreate(CompanyBase):
     pass

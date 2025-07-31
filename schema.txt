@@ -1,0 +1,357 @@
+(.venv) PS D:\csai-fastapi> python test_db_tables.py
+=== ALL TABLES ===
+- Account
+- Activity
+- Agent
+- AgentInteraction
+- Call
+- Company
+- CompanyMember
+- Conversation
+- DatabaseIntegration
+- Document
+- ImageProcessingJob
+- Invitation
+- OTP
+- PromptTemplate
+- Session
+- TaskQueue
+- User
+- VerificationToken
+- _prisma_migrations
+- whatsapp_clients
+- whatsapp_messages
+- whatsapp_templates
+- whatsapp_webhooks
+
+=== TABLE DETAILS ===
+
+Account:
+  • userId: text (NOT NULL)
+  • type: text (NOT NULL)
+  • provider: text (NOT NULL)
+  • providerAccountId: text (NOT NULL)
+  • refresh_token: text (NULL)
+  • access_token: text (NULL)
+  • expires_at: integer (NULL)
+  • token_type: text (NULL)
+  • scope: text (NULL)
+  • id_token: text (NULL)
+  • session_state: text (NULL)
+  • createdAt: timestamp without time zone (NOT NULL)
+  • updatedAt: timestamp without time zone (NOT NULL)
+
+Activity:
+  • id: text (NOT NULL)
+  • user_id: character varying (NOT NULL)
+  • action: character varying (NOT NULL)
+  • entity_type: character varying (NOT NULL)
+  • entity_id: character varying (NOT NULL)
+  • metadata: json (NULL)
+  • created_at: timestamp without time zone (NOT NULL)
+
+Agent:
+  • id: text (NOT NULL)
+  • user_id: character varying (NOT NULL)
+  • name: character varying (NOT NULL)
+  • type: character varying (NOT NULL)
+  • company_id: text (NULL)
+  • prompt: text (NOT NULL)
+  • additional_context: json (NULL)
+  • confidence_threshold: double precision (NULL)
+  • files: ARRAY (NULL)
+  • created_at: timestamp without time zone (NULL)
+  • updated_at: timestamp without time zone (NULL)
+  • template_id: character varying (NULL)
+  • advanced_settings: json (NULL)
+  • is_active: boolean (NOT NULL)
+  • average_confidence: double precision (NULL)
+  • average_response_time: double precision (NULL)
+  • database_integration_ids: ARRAY (NULL)
+  • image_processing_config: jsonb (NULL)
+  • image_processing_enabled: boolean (NULL)
+  • knowledge_base_ids: ARRAY (NULL)
+  • max_response_tokens: integer (NULL)
+  • search_config: jsonb (NULL)
+  • success_rate: double precision (NULL)
+  • temperature: double precision (NULL)
+  • total_interactions: integer (NULL)
+
+AgentInteraction:
+  • id: text (NOT NULL)
+  • agent_id: text (NOT NULL)
+  • conversation_id: text (NOT NULL)
+  • query: text (NOT NULL)
+  • response: text (NOT NULL)
+  • confidence_score: double precision (NOT NULL)
+  • response_time: double precision (NOT NULL)
+  • tokens_used: integer (NULL)
+  • was_successful: boolean (NULL)
+  • previous_agent_id: text (NULL)
+  • context_window: jsonb (NULL)
+  • created_at: timestamp without time zone (NOT NULL)
+  • last_task_id: character varying (NULL)
+
+Call:
+  • id: integer (NOT NULL)
+  • call_sid: character varying (NULL)
+  • company_id: text (NULL)
+  • from_number: character varying (NOT NULL)
+  • to_number: character varying (NOT NULL)
+  • status: character varying (NOT NULL)
+  • duration: double precision (NULL)
+  • recording_url: character varying (NULL)
+  • created_at: timestamp without time zone (NULL)
+  • updated_at: timestamp without time zone (NULL)
+  • answered_at: timestamp without time zone (NULL)
+  • conversation_id: text (NULL)
+  • cost: double precision (NULL)
+  • ended_at: timestamp without time zone (NULL)
+  • quality_score: double precision (NULL)
+  • transcription: text (NULL)
+  • last_task_id: character varying (NULL)
+
+Company:
+  • id: text (NOT NULL)
+  • user_id: character varying (NOT NULL)
+  • name: character varying (NOT NULL)
+  • business_name: character varying (NOT NULL)
+  • email: text (NOT NULL)
+  • address: character varying (NOT NULL)
+  • website: character varying (NULL)
+  • logo: character varying (NULL)
+  • prompt_templates: jsonb (NULL)
+  • api_key: character varying (NULL)
+  • phone_number: character varying (NULL)
+  • created_at: timestamp without time zone (NULL)
+  • updated_at: timestamp without time zone (NULL)
+  • settings: json (NULL)
+  • active: boolean (NULL)
+  • average_response_time: double precision (NULL)
+  • business_type: character varying (NULL)
+  • current_image_storage: bigint (NULL)
+  • image_config: jsonb (NULL)
+  • image_storage_limit: bigint (NULL)
+  • qdrant_collection_name: text (NULL)
+  • total_conversations: integer (NULL)
+  • vector_dimension: integer (NULL)
+  • task_success_rate: double precision (NULL)
+  • average_task_latency: double precision (NULL)
+  • task_count: integer (NOT NULL)
+
+CompanyMember:
+  • id: text (NOT NULL)
+  • user_id: text (NOT NULL)
+  • company_id: text (NOT NULL)
+  • role: text (NOT NULL)
+  • created_at: timestamp without time zone (NOT NULL)
+  • updated_at: timestamp without time zone (NOT NULL)
+
+Conversation:
+  • id: text (NOT NULL)
+  • customer_id: character varying (NOT NULL)
+  • company_id: text (NULL)
+  • current_agent_id: text (NULL)
+  • history: jsonb (NULL)
+  • meta_data: json (NULL)
+  • created_at: timestamp without time zone (NULL)
+  • updated_at: timestamp without time zone (NULL)
+  • duration: double precision (NULL)
+  • ended_at: timestamp without time zone (NULL)
+  • ended_by: character varying (NULL)
+  • messages_count: integer (NULL)
+  • sentiment_score: double precision (NULL)
+  • status: character varying (NULL)
+  • last_task_id: character varying (NULL)
+
+DatabaseIntegration:
+  • id: text (NOT NULL)
+  • company_id: text (NOT NULL)
+  • name: character varying (NOT NULL)
+  • type: text (NOT NULL)
+  • connection_details: json (NOT NULL)
+  • schema_mapping: json (NULL)
+  • included_tables: ARRAY (NULL)
+  • excluded_tables: ARRAY (NULL)
+  • sync_frequency: character varying (NULL)
+  • last_sync: timestamp without time zone (NULL)
+  • is_active: boolean (NULL)
+  • created_at: timestamp without time zone (NULL)
+  • updated_at: timestamp without time zone (NULL)
+
+Document:
+  • id: text (NOT NULL)
+  • company_id: text (NULL)
+  • agent_id: text (NULL)
+  • name: character varying (NOT NULL)
+  • type: text (NOT NULL)
+  • content: text (NOT NULL)
+  • file_type: character varying (NULL)
+  • file_size: integer (NULL)
+  • original_filename: character varying (NULL)
+  • width: integer (NULL)
+  • height: integer (NULL)
+  • image_format: character varying (NULL)
+  • is_image: boolean (NULL)
+  • user_description: text (NULL)
+  • auto_description: text (NULL)
+  • embedding_id: character varying (NULL)
+  • last_embedded: timestamp without time zone (NULL)
+  • chunk_count: integer (NULL)
+  • created_at: timestamp without time zone (NULL)
+  • updated_at: timestamp without time zone (NULL)
+  • image_metadata: jsonb (NULL)
+  • image_content: bytea (NULL)
+  • embedding: ARRAY (NULL)
+
+ImageProcessingJob:
+  • id: text (NOT NULL)
+  • document_id: text (NOT NULL)
+  • company_id: text (NOT NULL)
+  • agent_id: text (NOT NULL)
+  • status: character varying (NOT NULL)
+  • error_message: text (NULL)
+  • processing_config: json (NULL)
+  • results: json (NULL)
+  • created_at: timestamp without time zone (NOT NULL)
+  • updated_at: timestamp without time zone (NOT NULL)
+  • completed_at: timestamp without time zone (NULL)
+
+Invitation:
+  • id: text (NOT NULL)
+  • email: text (NOT NULL)
+  • company_id: text (NOT NULL)
+  • role: text (NOT NULL)
+  • token: text (NOT NULL)
+  • expires_at: timestamp without time zone (NOT NULL)
+  • created_at: timestamp without time zone (NOT NULL)
+  • updated_at: timestamp without time zone (NOT NULL)
+  • accepted_at: timestamp without time zone (NULL)
+  • status: text (NOT NULL)
+
+OTP:
+  • id: uuid (NOT NULL)
+  • email: text (NOT NULL)
+  • code: text (NOT NULL)
+  • expiresAt: timestamp without time zone (NOT NULL)
+  • createdAt: timestamp without time zone (NOT NULL)
+  • updatedAt: timestamp without time zone (NULL)
+
+PromptTemplate:
+  • id: character varying (NOT NULL)
+  • name: character varying (NOT NULL)
+  • description: text (NULL)
+  • content: text (NOT NULL)
+  • category: USER-DEFINED (NOT NULL)
+  • agent_type: USER-DEFINED (NOT NULL)
+  • variables: jsonb (NULL)
+  • is_default: boolean (NULL)
+  • is_system: boolean (NULL)
+  • company_id: character varying (NULL)
+  • user_id: character varying (NULL)
+  • created_at: timestamp without time zone (NULL)
+  • updated_at: timestamp without time zone (NULL)
+
+Session:
+  • sessionToken: text (NOT NULL)
+  • userId: text (NOT NULL)
+  • expires: timestamp without time zone (NOT NULL)
+  • createdAt: timestamp without time zone (NOT NULL)
+  • updatedAt: timestamp without time zone (NOT NULL)
+
+TaskQueue:
+  • id: character varying (NOT NULL)
+  • task_type: character varying (NOT NULL)
+  • status: character varying (NOT NULL)
+  • parameters: jsonb (NULL)
+  • result: jsonb (NULL)
+  • error_message: text (NULL)
+  • retry_count: integer (NOT NULL)
+  • max_retries: integer (NOT NULL)
+  • next_retry_at: timestamp without time zone (NULL)
+  • company_id: character varying (NULL)
+  • agent_id: character varying (NULL)
+  • conversation_id: character varying (NULL)
+  • call_id: character varying (NULL)
+  • created_at: timestamp without time zone (NOT NULL)
+  • started_at: timestamp without time zone (NULL)
+  • completed_at: timestamp without time zone (NULL)
+
+User:
+  • id: text (NOT NULL)
+  • name: text (NULL)
+  • email: text (NOT NULL)
+  • emailVerified: timestamp without time zone (NULL)
+  • image: text (NULL)
+  • createdAt: timestamp without time zone (NOT NULL)
+  • updatedAt: timestamp without time zone (NOT NULL)
+
+VerificationToken:
+  • identifier: text (NOT NULL)
+  • token: text (NOT NULL)
+  • expires: timestamp without time zone (NOT NULL)
+
+_prisma_migrations:
+  • id: character varying (NOT NULL)
+  • checksum: character varying (NOT NULL)
+  • finished_at: timestamp with time zone (NULL)
+  • migration_name: character varying (NOT NULL)
+  • logs: text (NULL)
+  • rolled_back_at: timestamp with time zone (NULL)
+  • started_at: timestamp with time zone (NOT NULL)
+  • applied_steps_count: integer (NOT NULL)
+
+whatsapp_clients:
+  • id: uuid (NOT NULL)
+  • business_id: character varying (NOT NULL)
+  • waba_id: character varying (NULL)
+  • phone_number_id: character varying (NULL)
+  • access_token: text (NULL)
+  • status: character varying (NOT NULL)
+  • current_step: character varying (NULL)
+  • created_at: timestamp with time zone (NULL)
+  • updated_at: timestamp with time zone (NULL)
+
+whatsapp_messages:
+  • id: uuid (NOT NULL)
+  • business_id: character varying (NOT NULL)
+  • message_id: character varying (NULL)
+  • to_phone: character varying (NOT NULL)
+  • from_phone: character varying (NULL)
+  • message_type: character varying (NOT NULL)
+  • content: text (NULL)
+  • status: character varying (NOT NULL)
+  • direction: character varying (NOT NULL)
+  • template_name: character varying (NULL)
+  • media_url: text (NULL)
+  • media_type: character varying (NULL)
+  • error_message: text (NULL)
+  • metadata: jsonb (NULL)
+  • timestamp_sent: timestamp with time zone (NULL)
+  • timestamp_delivered: timestamp with time zone (NULL)
+  • timestamp_read: timestamp with time zone (NULL)
+  • created_at: timestamp with time zone (NULL)
+  • updated_at: timestamp with time zone (NULL)
+
+whatsapp_templates:
+  • id: uuid (NOT NULL)
+  • business_id: character varying (NOT NULL)
+  • template_name: character varying (NOT NULL)
+  • language_code: character varying (NOT NULL)
+  • category: character varying (NOT NULL)
+  • status: character varying (NOT NULL)
+  • components: jsonb (NULL)
+  • template_id: character varying (NULL)
+  • created_at: timestamp with time zone (NULL)
+  • updated_at: timestamp with time zone (NULL)
+
+whatsapp_webhooks:
+  • id: uuid (NOT NULL)
+  • webhook_id: character varying (NULL)
+  • business_id: character varying (NULL)
+  • event_type: character varying (NOT NULL)
+  • payload: jsonb (NOT NULL)
+  • processed: boolean (NULL)
+  • processing_error: text (NULL)
+  • created_at: timestamp with time zone (NULL)
+  • processed_at: timestamp with time zone (NULL)
