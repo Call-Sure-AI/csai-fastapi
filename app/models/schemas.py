@@ -129,7 +129,7 @@ class AgentUpdate(AgentBase):
 
 class Agent(AgentBase):
     id: str
-    user_id: str  # ✅ Only in response model
+    user_id: str
     created_at: datetime
     updated_at: datetime
     
