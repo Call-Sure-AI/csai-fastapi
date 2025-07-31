@@ -2,6 +2,7 @@ from fastapi import APIRouter, HTTPException, Depends, UploadFile, File, Form, Q
 from typing import List, Optional
 from handlers.s3_handler import S3Handler, S3Config
 from middleware.auth_middleware import get_current_user
+from app.models.schemas import UserResponse
 from fastapi.responses import StreamingResponse
 import io
 import logging
@@ -11,12 +12,15 @@ router = APIRouter(prefix="/s3", tags=["s3"])
 
 s3_handler = S3Handler()
 
+def get_s3_handler() -> S3Handler:
+    return S3Handler()
+
 @router.post("/upload")
 async def upload_file(
     file: UploadFile = File(...),
     enable_public_read_access: bool = Form(True),
     custom_key: Optional[str] = Form(None),
-    current_user: dict = Depends(get_current_user)
+    current_user: UserResponse = Depends(get_current_user)
 ):
     try:
         result = await s3_handler.upload_file(
@@ -34,10 +38,10 @@ async def upload_file(
         logger.error(f"Error in upload_file: {e}")
         raise HTTPException(status_code=500, detail="Internal server error")
 
-@router.post("/upload-multiple")
+@router.post("/upload-multiple", response_model=None)
 async def upload_multiple_files(
     files: List[UploadFile] = File(...),
-    current_user: dict = Depends(get_current_user)
+    current_user: UserResponse = Depends(get_current_user)
 ):
     try:
         results = await s3_handler.upload_multiple_files(files)
@@ -56,10 +60,11 @@ async def upload_multiple_files(
         logger.error(f"Error in upload_multiple_files: {e}")
         raise HTTPException(status_code=500, detail="Internal server error")
 
-@router.get("/file-details/{key:path}")
+@router.get("/file-details/{key:path}", response_model=None)
 async def get_file_details(
     key: str,
-    current_user: dict = Depends(get_current_user)
+    current_user: UserResponse = Depends(get_current_user),
+    s3_handler: S3Handler = Depends(get_s3_handler)
 ):
     try:
         result = await s3_handler.get_file_details(key)
@@ -79,7 +84,7 @@ async def get_file_details(
 @router.get("/download/{key:path}")
 async def download_file(
     key: str,
-    current_user: dict = Depends(get_current_user)
+    current_user: UserResponse = Depends(get_current_user)
 ):
     try:
         result = await s3_handler.download_file(key)
@@ -107,7 +112,7 @@ async def download_file(
 @router.delete("/delete/{key:path}")
 async def delete_file(
     key: str,
-    current_user: dict = Depends(get_current_user)
+    current_user: UserResponse = Depends(get_current_user)
 ):
     try:
         result = await s3_handler.delete_file(key)
@@ -126,7 +131,7 @@ async def delete_file(
 @router.delete("/delete-multiple")
 async def delete_multiple_files(
     keys: List[str],
-    current_user: dict = Depends(get_current_user)
+    current_user: UserResponse = Depends(get_current_user)
 ):
     try:
         results = await s3_handler.delete_multiple_files(keys)
@@ -149,7 +154,7 @@ async def delete_multiple_files(
 async def list_files(
     prefix: str = Query("", description="File prefix to filter by"),
     max_keys: int = Query(1000, description="Maximum number of files to return"),
-    current_user: dict = Depends(get_current_user)
+    current_user: UserResponse = Depends(get_current_user)
 ):
     try:
         result = await s3_handler.list_files(prefix=prefix, max_keys=max_keys)

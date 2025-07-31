@@ -10,6 +10,7 @@ from app.utils.activity_logger import ActivityLogger
 from handlers.email_handler import EmailHandler, EmailRequest
 from app.models.schemas import InvitationCreate, InvitationAccept, Invitation
 import logging
+import json
 
 logger = logging.getLogger(__name__)
 
@@ -25,7 +26,8 @@ class InvitationHandler:
         user_id: str
     ) -> Dict[str, Any]:
         try:
-            async with get_db_connection() as conn:
+            connection = await get_db_connection()
+            async with connection as conn:
                 company = await self.invitation_queries.get_company_by_id(conn, invitation_data.company_id)
                 
                 if not company:
@@ -77,7 +79,8 @@ class InvitationHandler:
             if not token:
                 raise ValueError("Token is required")
             
-            async with get_db_connection() as conn:
+            connection = await get_db_connection()
+            async with connection as conn:
                 invitation = await self.invitation_queries.get_invitation_by_token(conn, token)
                 
                 if not invitation:
@@ -89,13 +92,23 @@ class InvitationHandler:
                 if invitation['status'] == 'accepted':
                     raise ValueError("Invitation has already been accepted")
                 
+                company_data = invitation['company']
+                if isinstance(company_data, str):
+                    try:
+                        company = json.loads(company_data)
+                    except json.JSONDecodeError:
+                        logger.error(f"Failed to parse company JSON: {company_data}")
+                        company = {"id": None, "name": "Unknown", "business_name": "Unknown"}
+                else:
+                    company = company_data
+                
                 return {
                     "invitation": {
                         "email": invitation['email'],
                         "company": {
-                            "id": invitation['company']['id'],
-                            "name": invitation['company']['name'],
-                            "business_name": invitation['company']['business_name']
+                            "id": company['id'],
+                            "name": company['name'],
+                            "business_name": company['business_name']
                         },
                         "role": invitation['role'],
                         "expires_at": invitation['expires_at']
@@ -117,7 +130,8 @@ class InvitationHandler:
             if not token:
                 raise ValueError("Token is required")
             
-            async with get_db_connection() as conn:
+            connection = await get_db_connection()
+            async with connection as conn:
                 invitation = await self.invitation_queries.get_invitation_by_token_with_company(
                     conn, token
                 )
@@ -149,9 +163,9 @@ class InvitationHandler:
                             acceptance_data.name or invitation['email'].split('@')[0],
                             hashed_password
                         )
-                    
+
                     await self.invitation_queries.create_company_membership(
-                        conn, user['id'], invitation['company_id'], invitation['role']
+                        conn, user['id'], invitation['company']['id'], invitation['role']
                     )
 
                     try:
@@ -159,15 +173,15 @@ class InvitationHandler:
                             'user_id': user['id'],
                             'action': 'joined_company',
                             'entity_type': 'company',
-                            'entity_id': invitation['company_id'],
+                            'entity_id': invitation['company']['id'],
                             'metadata': {
                                 'role': invitation['role'],
-                                'invitation_id': invitation['id']
+                                'invitation_id': invitation['id'],
+                                'company_name': invitation['company']['name']
                             }
                         })
                     except Exception as log_error:
                         logger.error(f'Failed to log activity: {log_error}')
-                    
 
                     await self.invitation_queries.accept_invitation(conn, invitation['id'])
 
@@ -191,21 +205,22 @@ class InvitationHandler:
                         "email": user['email'],
                         "name": user['name'],
                         "image": user.get('image')
-                    }
+                    },
+                    "company": invitation['company']
                 }
                 
         except ValueError:
             raise
         except Exception as error:
-            logger.error(f"Accept invitation error: {error}")
+            logger.error(f"Accept invitation error: {error}", exc_info=True)
             raise Exception("Internal server error")
 
     async def list_invitations(self, company_id: str, user_id: str) -> Dict[str, Any]:
         try:
             logger.info(f"Listing invitations for company {company_id}")
             
-            async with get_db_connection() as conn:
-                # Verify company ownership
+            connection = await get_db_connection()
+            async with connection as conn:
                 company = await self.invitation_queries.get_company_by_id(conn, company_id)
                 
                 if not company:
@@ -242,8 +257,8 @@ class InvitationHandler:
         try:
             logger.info(f"Listing accepted invitations for company {company_id}")
             
-            async with get_db_connection() as conn:
-                # Verify company ownership
+            connection = await get_db_connection()
+            async with connection as conn:
                 company = await self.invitation_queries.get_company_by_id(conn, company_id)
                 
                 if not company:
@@ -275,8 +290,8 @@ class InvitationHandler:
 
     async def list_expired_invitations(self, company_id: str, user_id: str) -> Dict[str, Any]:
         try:
-            async with get_db_connection() as conn:
-                # Verify company ownership
+            connection = await get_db_connection()
+            async with connection as conn:
                 company = await self.invitation_queries.get_company_by_id(conn, company_id)
                 
                 if not company:
@@ -308,7 +323,8 @@ class InvitationHandler:
 
     async def delete_invitation(self, invitation_id: str, user_id: str) -> Dict[str, str]:
         try:
-            async with get_db_connection() as conn:
+            connection = await get_db_connection()
+            async with connection as conn:
                 invitation = await self.invitation_queries.get_invitation_with_company(
                     conn, invitation_id
                 )
@@ -331,7 +347,8 @@ class InvitationHandler:
 
     async def send_invitation_email(self, invitation_id: str, user_id: str) -> Dict[str, str]:
         try:
-            async with get_db_connection() as conn:
+            connection = await get_db_connection()
+            async with connection as conn:
                 invitation = await self.invitation_queries.get_invitation_with_company(
                     conn, invitation_id
                 )

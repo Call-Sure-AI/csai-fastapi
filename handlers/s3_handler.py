@@ -127,40 +127,48 @@ class S3Handler:
 
     async def get_file_details(self, key: str) -> Dict[str, Any]:
         try:
+            # Use head_object to get metadata
             loop = asyncio.get_event_loop()
-            result = await loop.run_in_executor(
+            response = await loop.run_in_executor(
                 None,
-                lambda: self.s3_client.head_object(Bucket=self.bucket_name, Key=key)
+                lambda: self.s3_client.head_object(
+                    Bucket=self.bucket_name,
+                    Key=key
+                )
             )
             
             return {
                 "success": True,
-                "metadata": {
-                    "content_type": result.get('ContentType'),
-                    "size": result.get('ContentLength'),
-                    "last_modified": result.get('LastModified'),
-                    "etag": result.get('ETag'),
-                    "metadata": result.get('Metadata', {}),
-                    "version_id": result.get('VersionId')
-                }
+                "key": key,
+                "size": response.get('ContentLength', 0),
+                "content_type": response.get('ContentType'),
+                "last_modified": response.get('LastModified'),
+                "etag": response.get('ETag'),
+                "metadata": response.get('Metadata', {}),
+                "url": f"https://{self.bucket_name}.s3.{self.config.region}.amazonaws.com/{key}"
             }
             
         except ClientError as e:
-            if e.response['Error']['Code'] == 'NoSuchKey':
+            error_code = e.response['Error']['Code']
+            if error_code == '403':
+                logger.error(f"Access denied for S3 object: {key}")
+                return {
+                    "success": False,
+                    "error": "Access denied - check S3 permissions"
+                }
+            elif error_code == '404':
+                logger.error(f"S3 object not found: {key}")
                 return {
                     "success": False,
                     "error": "File not found"
                 }
-            return {
-                "success": False,
-                "error": str(e)
-            }
-        except Exception as e:
-            logger.error(f"Get file details error: {e}")
-            return {
-                "success": False,
-                "error": str(e)
-            }
+            else:
+                logger.error(f"S3 error: {e}")
+                return {
+                    "success": False,
+                    "error": str(e)
+                }
+
 
     async def download_file(self, key: str) -> Dict[str, Any]:
         try:

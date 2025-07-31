@@ -1,6 +1,6 @@
 from fastapi import APIRouter, HTTPException, Depends
 from handlers.email_handler import EmailHandler, EmailRequest, EmailResponse
-from app.models.schemas import BulkEmailRequest, TemplateEmailRequest, OTPEmailRequest
+from app.models.schemas import BulkEmailRequest, TemplateEmailRequest, OTPEmailRequest, UserResponse, VerificationEmailRequest
 from middleware.auth_middleware import get_current_user
 from pydantic import BaseModel, EmailStr
 from typing import List, Optional, Dict, Any
@@ -13,9 +13,11 @@ email_handler = EmailHandler()
 @router.post("/send", response_model=EmailResponse)
 async def send_email(
     email_request: EmailRequest,
-    current_user: dict = Depends(get_current_user)
+    current_user: UserResponse = Depends(get_current_user),
+    email_handler: EmailHandler = Depends(EmailHandler)
 ):
     try:
+        user_id = current_user.id
         result = await email_handler.send_email(email_request)
         return result
     except HTTPException:
@@ -27,7 +29,7 @@ async def send_email(
 @router.post("/send-otp", response_model=EmailResponse)
 async def send_otp_email(
     otp_request: OTPEmailRequest,
-    current_user: dict = Depends(get_current_user)
+    current_user: UserResponse = Depends(get_current_user)
 ):
     try:
         result = await email_handler.send_otp_email(otp_request.email, otp_request.code)
@@ -41,7 +43,7 @@ async def send_otp_email(
 @router.post("/send-bulk", response_model=EmailResponse)
 async def send_bulk_emails(
     bulk_request: BulkEmailRequest,
-    current_user: dict = Depends(get_current_user)
+    current_user: UserResponse = Depends(get_current_user)
 ):
     try:
         result = await email_handler.send_bulk_emails(
@@ -59,9 +61,11 @@ async def send_bulk_emails(
 @router.post("/send-template", response_model=EmailResponse)
 async def send_template_email(
     template_request: TemplateEmailRequest,
-    current_user: dict = Depends(get_current_user)
+    current_user: UserResponse = Depends(get_current_user),
+    email_handler: EmailHandler = Depends(EmailHandler)
 ):
     try:
+        user_id = current_user.id
         result = await email_handler.send_template_email(
             to=template_request.to,
             template_name=template_request.template_name,
@@ -79,7 +83,7 @@ async def send_template_email(
 async def send_welcome_email(
     to: EmailStr,
     name: str,
-    current_user: dict = Depends(get_current_user)
+    current_user: UserResponse = Depends(get_current_user)
 ):
     try:
         result = await email_handler.send_template_email(
@@ -98,7 +102,7 @@ async def send_welcome_email(
 async def send_password_reset_email(
     to: EmailStr,
     reset_link: str,
-    current_user: dict = Depends(get_current_user)
+    current_user: UserResponse = Depends(get_current_user)
 ):
     try:
         result = await email_handler.send_template_email(
@@ -117,7 +121,7 @@ async def send_password_reset_email(
 async def send_verification_email(
     to: EmailStr,
     verification_link: str,
-    current_user: dict = Depends(get_current_user)
+    current_user: UserResponse = Depends(get_current_user)
 ):
     try:
         result = await email_handler.send_template_email(
