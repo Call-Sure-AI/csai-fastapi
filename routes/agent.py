@@ -23,13 +23,21 @@ async def get_all_agents(
 ):
     """Get all agents for the current user"""
     try:
+        logger.info(f"get_all_agents route called by user: {current_user}")
+        logger.info(f"current_user.id: {current_user.id}, type: {type(current_user.id)}")
+        logger.info(f"Query parameter 'id': {id}")
+        
         user_id = current_user.id
         agents = await agent_handler.get_all_agents(user_id, id)
+        
+        logger.info(f"Successfully retrieved {len(agents)} agents")
         return agents
+        
     except ValueError as e:
+        logger.error(f"ValueError in get_all_agents route: {e}")
         raise HTTPException(status_code=404, detail=str(e))
     except Exception as e:
-        logger.error(f"Error in get_all_agents: {e}")
+        logger.error(f"Error in get_all_agents route: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.get("/test")
@@ -87,7 +95,7 @@ async def get_agents_by_user_id(
         logger.error(f"Error in get_agents_by_user_id: {e}")
         raise HTTPException(status_code=500, detail="Internal server error")
 
-@router.post("/", response_model=Agent, status_code=201)
+@router.post("/create", response_model=Agent, status_code=201)
 async def create_agent(
     agent_data: AgentCreate,
     current_user: UserResponse = Depends(get_current_user),
@@ -122,7 +130,7 @@ async def update_agent(
         logger.error(f"Error in update_agent: {e}")
         raise HTTPException(status_code=500, detail="Internal server error")
 
-@router.delete("/{agent_id}", status_code=204)
+@router.delete("/delete/{agent_id}", status_code=204)
 async def delete_agent(
     agent_id: str,
     current_user: UserResponse = Depends(get_current_user),

@@ -102,7 +102,11 @@ class AgentBase(BaseModel):
     image_processing_config: Optional[Dict[str, Any]] = None
 
 class AgentCreate(AgentBase):
-    user_id: str
+    name: str
+    type: str
+    is_active: bool = True
+    company_id: str
+    prompt: str
 
 class AgentUpdate(AgentBase):
     name: Optional[str] = Field(None, min_length=1, max_length=255)
@@ -110,10 +114,22 @@ class AgentUpdate(AgentBase):
     is_active: Optional[bool] = None
     company_id: Optional[str] = None
     prompt: Optional[str] = None
+    additional_context: Optional[Dict[str, Any]] = None
+    advanced_settings: Optional[Dict[str, Any]] = None
+    confidence_threshold: Optional[float] = Field(None, ge=0, le=1)
+    files: Optional[List[str]] = None
+    template_id: Optional[str] = Field(None, max_length=255)
+    knowledge_base_ids: Optional[List[str]] = None
+    database_integration_ids: Optional[List[str]] = None
+    search_config: Optional[Dict[str, Any]] = None
+    max_response_tokens: Optional[int] = None
+    temperature: Optional[float] = None
+    image_processing_enabled: Optional[bool] = None
+    image_processing_config: Optional[Dict[str, Any]] = None
 
 class Agent(AgentBase):
     id: str
-    user_id: str
+    user_id: str  # ✅ Only in response model
     created_at: datetime
     updated_at: datetime
     
