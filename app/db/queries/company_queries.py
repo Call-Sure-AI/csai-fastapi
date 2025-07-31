@@ -1,8 +1,11 @@
 from typing import List, Dict, Any, Optional
-from app.models.schemas import CompanyCreate, CompanyUpdate
+from app.models.schemas import CompanyCreate, CompanyUpdate, CompanySettings
 import asyncpg
 import json
 from datetime import datetime
+import uuid
+import logging
+logger = logging.getLogger(__name__)
 
 class CompanyQueries:
     
@@ -17,18 +20,26 @@ class CompanyQueries:
                     'type', a.type,
                     'is_active', a.is_active
                 )) FILTER (WHERE a.id IS NOT NULL) as agents,
-                json_agg(DISTINCT jsonb_build_object(
-                    'id', call.id,
-                    'created_at', call.created_at
-                ) ORDER BY call.created_at DESC) FILTER (WHERE call.id IS NOT NULL) as recent_calls,
-                json_agg(DISTINCT jsonb_build_object(
-                    'id', conv.id,
-                    'created_at', conv.created_at
-                ) ORDER BY conv.created_at DESC) FILTER (WHERE conv.id IS NOT NULL) as recent_conversations
-            FROM companies c
-            LEFT JOIN agents a ON c.id = a.company_id
-            LEFT JOIN calls call ON c.id = call.company_id
-            LEFT JOIN conversations conv ON c.id = conv.company_id
+                (
+                    SELECT json_agg(
+                        jsonb_build_object('id', call_sub.id, 'created_at', call_sub.created_at)
+                        ORDER BY call_sub.created_at DESC
+                    )
+                    FROM "Call" call_sub 
+                    WHERE call_sub.company_id = c.id
+                    LIMIT 5
+                ) as recent_calls,
+                (
+                    SELECT json_agg(
+                        jsonb_build_object('id', conv_sub.id, 'created_at', conv_sub.created_at)
+                        ORDER BY conv_sub.created_at DESC
+                    )
+                    FROM "Conversation" conv_sub 
+                    WHERE conv_sub.company_id = c.id
+                    LIMIT 5
+                ) as recent_conversations
+            FROM "Company" c
+            LEFT JOIN "Agent" a ON c.id = a.company_id
             WHERE c.user_id = $1
             GROUP BY c.id
             ORDER BY c.created_at DESC
@@ -43,8 +54,8 @@ class CompanyQueries:
                 json_agg(jsonb_build_object(
                     'company_id', cm.company_id
                 )) FILTER (WHERE cm.company_id IS NOT NULL) as company_memberships
-            FROM users u
-            LEFT JOIN company_memberships cm ON u.id = cm.user_id
+            FROM "User" u
+            LEFT JOIN "CompanyMember" cm ON u.id = cm.user_id
             WHERE u.id = $1
             GROUP BY u.id
         """
@@ -55,26 +66,38 @@ class CompanyQueries:
         query = """
             SELECT 
                 c.*,
-                json_agg(DISTINCT jsonb_build_object(
-                    'id', a.id,
-                    'name', a.name,
-                    'type', a.type,
-                    'is_active', a.is_active
-                )) FILTER (WHERE a.id IS NOT NULL) as agents,
-                json_agg(DISTINCT jsonb_build_object(
-                    'id', call.id,
-                    'created_at', call.created_at
-                ) ORDER BY call.created_at DESC) FILTER (WHERE call.id IS NOT NULL) as recent_calls,
-                json_agg(DISTINCT jsonb_build_object(
-                    'id', conv.id,
-                    'created_at', conv.created_at
-                ) ORDER BY conv.created_at DESC) FILTER (WHERE conv.id IS NOT NULL) as recent_conversations
-            FROM companies c
-            LEFT JOIN agents a ON c.id = a.company_id
-            LEFT JOIN calls call ON c.id = call.company_id
-            LEFT JOIN conversations conv ON c.id = conv.company_id
+                (
+                    SELECT json_agg(
+                        jsonb_build_object(
+                            'id', a.id,
+                            'name', a.name,
+                            'type', a.type,
+                            'is_active', a.is_active
+                        )
+                    )
+                    FROM "Agent" a 
+                    WHERE a.company_id = c.id
+                ) as agents,
+                (
+                    SELECT json_agg(
+                        jsonb_build_object('id', call.id, 'created_at', call.created_at)
+                        ORDER BY call.created_at DESC
+                    )
+                    FROM "Call" call 
+                    WHERE call.company_id = c.id
+                    LIMIT 10
+                ) as recent_calls,
+                (
+                    SELECT json_agg(
+                        jsonb_build_object('id', conv.id, 'created_at', conv.created_at)
+                        ORDER BY conv.created_at DESC
+                    )
+                    FROM "Conversation" conv 
+                    WHERE conv.company_id = c.id
+                    LIMIT 10
+                ) as recent_conversations
+            FROM "Company" c
             WHERE c.user_id = $1
-            GROUP BY c.id
             ORDER BY c.created_at DESC
             LIMIT 1
         """
@@ -85,26 +108,38 @@ class CompanyQueries:
         query = """
             SELECT 
                 c.*,
-                json_agg(DISTINCT jsonb_build_object(
-                    'id', a.id,
-                    'name', a.name,
-                    'type', a.type,
-                    'is_active', a.is_active
-                )) FILTER (WHERE a.id IS NOT NULL) as agents,
-                json_agg(DISTINCT jsonb_build_object(
-                    'id', call.id,
-                    'created_at', call.created_at
-                ) ORDER BY call.created_at DESC) FILTER (WHERE call.id IS NOT NULL) as recent_calls,
-                json_agg(DISTINCT jsonb_build_object(
-                    'id', conv.id,
-                    'created_at', conv.created_at
-                ) ORDER BY conv.created_at DESC) FILTER (WHERE conv.id IS NOT NULL) as recent_conversations
-            FROM companies c
-            LEFT JOIN agents a ON c.id = a.company_id
-            LEFT JOIN calls call ON c.id = call.company_id
-            LEFT JOIN conversations conv ON c.id = conv.company_id
+                (
+                    SELECT json_agg(
+                        jsonb_build_object(
+                            'id', a.id,
+                            'name', a.name,
+                            'type', a.type,
+                            'is_active', a.is_active
+                        )
+                    )
+                    FROM "Agent" a 
+                    WHERE a.company_id = c.id
+                ) as agents,
+                (
+                    SELECT json_agg(
+                        jsonb_build_object('id', call.id, 'created_at', call.created_at)
+                        ORDER BY call.created_at DESC
+                    )
+                    FROM "Call" call 
+                    WHERE call.company_id = c.id
+                    LIMIT 10
+                ) as recent_calls,
+                (
+                    SELECT json_agg(
+                        jsonb_build_object('id', conv.id, 'created_at', conv.created_at)
+                        ORDER BY conv.created_at DESC
+                    )
+                    FROM "Conversation" conv 
+                    WHERE conv.company_id = c.id
+                    LIMIT 10
+                ) as recent_conversations
+            FROM "Company" c
             WHERE c.id = $1
-            GROUP BY c.id
         """
         row = await conn.fetchrow(query, company_id)
         return dict(row) if row else None
@@ -113,19 +148,24 @@ class CompanyQueries:
         query = """
             SELECT 
                 c.*,
-                json_agg(DISTINCT jsonb_build_object(
-                    'id', a.id,
-                    'name', a.name,
-                    'type', a.type
-                )) FILTER (WHERE a.id IS NOT NULL) as agents,
-                json_agg(DISTINCT jsonb_build_object(
-                    'id', call.id
-                )) FILTER (WHERE call.id IS NOT NULL) as calls
-            FROM companies c
-            LEFT JOIN agents a ON c.id = a.company_id
-            LEFT JOIN calls call ON c.id = call.company_id
+                (
+                    SELECT json_agg(
+                        jsonb_build_object(
+                            'id', a.id,
+                            'name', a.name,
+                            'type', a.type
+                        )
+                    )
+                    FROM "Agent" a 
+                    WHERE a.company_id = c.id
+                ) as agents,
+                (
+                    SELECT json_agg(jsonb_build_object('id', call.id))
+                    FROM "Call" call 
+                    WHERE call.company_id = c.id
+                ) as calls
+            FROM "Company" c
             WHERE c.user_id = $1
-            GROUP BY c.id
             ORDER BY c.created_at DESC
         """
         rows = await conn.fetch(query, user_id)
@@ -133,42 +173,49 @@ class CompanyQueries:
     
     async def get_company_by_id_and_user(self, conn: asyncpg.Connection, company_id: str, user_id: str) -> Optional[Dict[str, Any]]:
         query = """
-            SELECT * FROM companies 
+            SELECT * FROM "Company"
             WHERE id = $1 AND user_id = $2
         """
         row = await conn.fetchrow(query, company_id, user_id)
         return dict(row) if row else None
     
     async def create_company(self, conn: asyncpg.Connection, company_data: CompanyCreate, user_id: str, api_key: str) -> Dict[str, Any]:
+        company_id = str(uuid.uuid4())
         query = """
-            INSERT INTO companies (
-                name, business_name, email, address, website, logo,
+            INSERT INTO "Company" (
+                id, name, business_name, email, address, website, logo,
                 prompt_templates, phone_number, settings, user_id, api_key,
                 created_at, updated_at
             )
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, NOW(), NOW())
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, NOW(), NOW())
             RETURNING *
         """
-        
-        company_dict = company_data.dict()
+
+        company_dict = company_data.model_dump()
+
         prompt_templates_json = json.dumps(company_dict.get('prompt_templates')) if company_dict.get('prompt_templates') else None
         settings_json = json.dumps(company_dict.get('settings')) if company_dict.get('settings') else None
         
-        row = await conn.fetchrow(
-            query,
-            company_data.name,
-            company_data.business_name,
-            company_data.email,
-            company_data.address,
-            company_data.website,
-            company_data.logo,
-            prompt_templates_json,
-            company_data.phone_number,
-            settings_json,
-            user_id,
-            api_key
-        )
-        return dict(row)
+        try:
+            row = await conn.fetchrow(
+                query,
+                company_id,
+                company_dict['name'],
+                company_dict['business_name'],
+                company_dict['email'],
+                company_dict['address'],
+                str(company_dict.get('website')),
+                company_dict.get('logo'),
+                prompt_templates_json,
+                company_dict.get('phone_number'),
+                settings_json,
+                user_id,
+                api_key
+            )
+            return dict(row)
+        except Exception as e:
+            logger.error(f"Database error in create_company: {e}", exc_info=True)
+            raise
     
     async def update_company(self, conn: asyncpg.Connection, company_id: str, company_data: CompanyUpdate, user_id: str) -> Dict[str, Any]:
         update_fields = []
@@ -193,7 +240,7 @@ class CompanyQueries:
         values.extend([company_id, user_id])
         
         query = f"""
-            UPDATE companies 
+            UPDATE "Company"
             SET {', '.join(update_fields)}
             WHERE id = ${param_count} AND user_id = ${param_count + 1}
             RETURNING *
@@ -204,7 +251,7 @@ class CompanyQueries:
     
     async def delete_company(self, conn: asyncpg.Connection, company_id: str) -> Dict[str, Any]:
         query = """
-            DELETE FROM companies 
+            DELETE FROM "Company"
             WHERE id = $1 
             RETURNING *
         """
@@ -213,7 +260,7 @@ class CompanyQueries:
     
     async def update_api_key(self, conn: asyncpg.Connection, company_id: str, api_key: str) -> Dict[str, Any]:
         query = """
-            UPDATE companies 
+            UPDATE "Company"
             SET api_key = $1, updated_at = NOW()
             WHERE id = $2
             RETURNING *

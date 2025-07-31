@@ -1,5 +1,6 @@
 from fastapi import APIRouter, HTTPException, Depends
 from handlers.email_handler import EmailHandler, EmailRequest, EmailResponse
+from app.models.schemas import BulkEmailRequest, TemplateEmailRequest, OTPEmailRequest
 from middleware.auth_middleware import get_current_user
 from pydantic import BaseModel, EmailStr
 from typing import List, Optional, Dict, Any
@@ -8,21 +9,6 @@ import logging
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/email", tags=["email"])
 email_handler = EmailHandler()
-
-class BulkEmailRequest(BaseModel):
-    recipients: List[EmailStr]
-    subject: str
-    html: str
-
-class TemplateEmailRequest(BaseModel):
-    to: EmailStr
-    template_name: str
-    template_data: Dict[str, Any]
-    subject: Optional[str] = None
-
-class OTPEmailRequest(BaseModel):
-    email: EmailStr
-    code: str
 
 @router.post("/send", response_model=EmailResponse)
 async def send_email(

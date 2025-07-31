@@ -8,7 +8,7 @@ from app.models.schemas import (
 )
 from middleware.auth_middleware import get_current_user
 
-router = APIRouter(prefix="/api/auth", tags=["auth"])
+router = APIRouter(prefix="/auth", tags=["auth"])
 
 @router.post("/google", response_model=AuthResponse)
 async def google_auth(auth_request: GoogleAuthRequest, response: Response):

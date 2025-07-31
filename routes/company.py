@@ -1,6 +1,6 @@
-from fastapi import APIRouter, HTTPException, Depends, Path
+from fastapi import APIRouter, HTTPException, Depends, Path, Body
 from typing import List, Dict, Any
-from app.models.schemas import CompanyCreate, CompanyUpdate, Company
+from app.models.schemas import CompanyCreate, CompanyUpdate, Company, UserResponse
 from handlers.company_handler import CompanyHandler
 from middleware.auth_middleware import get_current_user
 import logging
@@ -23,10 +23,11 @@ async def get_all_companies_for_user(
 
 @router.get("/me", response_model=Company)
 async def get_company_by_current_user(
-    current_user: dict = Depends(get_current_user)
+    current_user: UserResponse = Depends(get_current_user),
+    company_handler: CompanyHandler = Depends(CompanyHandler)
 ):
     try:
-        user_id = current_user["id"]
+        user_id = current_user.id
         company = await company_handler.get_company_by_user(user_id)
         return company
     except ValueError as e:
@@ -47,19 +48,27 @@ async def get_companies_by_user_id(
         logger.error(f"Error in get_companies_by_user_id: {e}")
         raise HTTPException(status_code=500, detail="Internal server error")
 
-@router.post("/", response_model=Company, status_code=201)
+@router.post("/create", response_model=Company, status_code=201)
 async def create_company(
     company_data: CompanyCreate,
-    current_user: dict = Depends(get_current_user)
+    current_user: UserResponse = Depends(get_current_user),
+    company_handler: CompanyHandler = Depends(CompanyHandler)
 ):
     try:
-        user_id = current_user["id"]
+        logger.info(f"Creating company for user: {current_user.id}")
+        logger.info(f"Company data received: {company_data.dict()}")
+        
+        user_id = current_user.id
         company = await company_handler.create_company(company_data, user_id)
+        
+        logger.info(f"Company created successfully: {company.get('id')}")
         return company
+        
     except ValueError as e:
+        logger.error(f"ValueError in create_company: {e}")
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
-        logger.error(f"Error in create_company: {e}")
+        logger.error(f"Error in create_company: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.post("/create-or-update", response_model=Company)
@@ -80,11 +89,12 @@ async def create_or_update_company(
 @router.put("/{company_id}", response_model=Company)
 async def update_company(
     company_id: str = Path(..., description="Company ID"),
-    company_data: CompanyUpdate = None,
-    current_user: dict = Depends(get_current_user)
+    current_user: UserResponse = Depends(get_current_user),
+    company_handler: CompanyHandler = Depends(CompanyHandler),
+    company_data: CompanyUpdate = Body(...)
 ):
     try:
-        user_id = current_user["id"]
+        user_id = current_user.id
         company = await company_handler.update_company(company_id, company_data, user_id)
         return company
     except ValueError as e:
@@ -99,7 +109,7 @@ async def delete_company(
     current_user: dict = Depends(get_current_user)
 ):
     try:
-        user_id = current_user["id"]
+        user_id = current_user.id
         await company_handler.delete_company(company_id, user_id)
         return None
     except ValueError as e:
@@ -114,7 +124,7 @@ async def regenerate_api_key(
     current_user: dict = Depends(get_current_user)
 ):
     try:
-        user_id = current_user["id"]
+        user_id = current_user.id
         result = await company_handler.regenerate_api_key(company_id, user_id)
         return result
     except ValueError as e:
