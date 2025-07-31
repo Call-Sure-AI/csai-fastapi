@@ -48,7 +48,10 @@ class AgentHandler:
     async def get_all_agents(self, user_id: str, agent_id: Optional[str] = None) -> List[Dict[str, Any]]:
         """Get all agents for a user or a specific agent"""
         try:
+            logger.info(f"get_all_agents called with user_id: {user_id}, agent_id: {agent_id}")
+            
             if agent_id:
+                logger.info(f"Fetching specific agent with id: {agent_id}")
                 agent = await self.get_agent_by_id(agent_id)
                 return [agent] if agent else []
             
@@ -62,13 +65,27 @@ class AgentHandler:
                 ORDER BY a.created_at DESC
             """
             
+            logger.info(f"Executing query with user_id: {user_id}")
             agents = await self.db.execute_query(query, (user_id,))
+            
+            logger.info(f"Query result type: {type(agents)}, value: {agents}")
+            
+            if agents is None:
+                logger.warning(f"Query returned None for user_id: {user_id}")
+                return []
+            
+            logger.info(f"Found {len(agents)} agents for user_id: {user_id}")
+            
             # Parse JSON fields for each agent
-            return [self._parse_json_fields(agent) for agent in agents]
+            parsed_agents = [self._parse_json_fields(agent) for agent in agents]
+            logger.info(f"Returning {len(parsed_agents)} parsed agents")
+            
+            return parsed_agents
             
         except Exception as error:
-            logger.error(f"Error fetching agents: {error}")
+            logger.error(f"Error fetching agents: {error}", exc_info=True)
             raise Exception("Internal server error")
+
 
     async def get_agent_by_id(self, agent_id: str) -> Dict[str, Any]:
         """Get a specific agent by ID"""
@@ -157,7 +174,7 @@ class AgentHandler:
                 )
                 VALUES (
                     $1, $2, $3, $4, $5, $6, $7, $8::jsonb, $9::jsonb, $10,
-                    $11::jsonb, $12, $13::jsonb, $14::jsonb, $15::jsonb, 
+                    $11, $12, $13, $14, $15::jsonb, 
                     $16, $17, $18, $19::jsonb, $20, $21
                 )
                 RETURNING *
@@ -174,10 +191,10 @@ class AgentHandler:
                 json.dumps(agent_dict.get('additional_context')) if agent_dict.get('additional_context') else None,
                 json.dumps(agent_dict.get('advanced_settings')) if agent_dict.get('advanced_settings') else None,
                 agent_data.confidence_threshold,
-                json.dumps(agent_dict.get('files', [])),
+                agent_data.files or [],
                 agent_data.template_id,
-                json.dumps(agent_dict.get('knowledge_base_ids', [])),
-                json.dumps(agent_dict.get('database_integration_ids', [])),
+                agent_data.knowledge_base_ids or [],
+                agent_data.database_integration_ids or [],
                 json.dumps(agent_dict.get('search_config')) if agent_dict.get('search_config') else None,
                 agent_data.max_response_tokens,
                 agent_data.temperature,

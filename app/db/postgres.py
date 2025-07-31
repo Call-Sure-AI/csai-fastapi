@@ -59,9 +59,9 @@ class AsyncPostgresClient:
             async with self.get_connection() as conn:
                 # Set query timeout for voice call latency requirements
                 rows = await conn.fetch(query, *(params or []), timeout=timeout)
+                return [dict(row) for row in rows] if rows else []
         except asyncio.TimeoutError:
             logger.error(f"Query timeout after {timeout}s: {query[:100]}...")
-            raise
             raise
         except Exception as e:
             logger.error(f"Query error: {e}")
