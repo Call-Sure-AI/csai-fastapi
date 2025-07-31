@@ -5,19 +5,10 @@ from email.mime.multipart import MIMEMultipart
 from fastapi import HTTPException
 from pydantic import BaseModel, EmailStr
 from typing import Optional
-
-class EmailRequest(BaseModel):
-    to: EmailStr
-    subject: str
-    html: str
-    text: Optional[str] = None
-
-class EmailResponse(BaseModel):
-    success: bool
-    message: str
+from app.models.schemas import EmailRequest, EmailResponse
 
 class EmailHandler:
-    """Email handling controller for sending emails"""
+    """Email handling controsller for sending emails"""
     
     @staticmethod
     async def send_email(email_request: EmailRequest) -> EmailResponse:
@@ -168,27 +159,114 @@ class EmailHandler:
 
     @staticmethod
     def _get_email_template(template_name: str, data: dict) -> str:
-        """Get email template by name and populate with data"""
-        templates = {
-            'otp': EmailHandler._get_otp_template(data),
-            'welcome': EmailHandler._get_welcome_template(data),
-            'password_reset': EmailHandler._get_password_reset_template(data),
-            'verification': EmailHandler._get_verification_template(data)
-        }
-        
-        return templates.get(template_name, "")
+        try:
+            if template_name == 'otp':
+                return EmailHandler._get_otp_template(data)
+            elif template_name == 'welcome':
+                return EmailHandler._get_welcome_template(data)
+            elif template_name == 'password_reset':
+                return EmailHandler._get_password_reset_template(data)
+            elif template_name == 'verification':
+                return EmailHandler._get_verification_template(data)
+            elif template_name == 'monthly_invoice':
+                return EmailHandler._get_monthly_invoice_template(data)
+            else:
+                raise ValueError(f"Template '{template_name}' not found")
+                
+        except Exception as e:
+            raise ValueError(f"Failed to load template '{template_name}': {str(e)}")
+
+    @staticmethod
+    def _get_monthly_invoice_template(data: dict) -> str:
+        """Generate monthly invoice email template"""
+        try:
+            client_name = data.get('client_name', 'Valued Client')
+            invoice_number = data.get('invoice_number', 'N/A')
+            billing_period = data.get('billing_period', 'N/A')
+            amount_due = data.get('amount_due', '$0.00')
+            due_date = data.get('due_date', 'N/A')
+            services = data.get('services', [])
+            
+            services_html = ""
+            if services:
+                services_html = "<ul>"
+                for service in services:
+                    description = service.get('description', 'Service')
+                    amount = service.get('amount', '$0.00')
+                    services_html += f"<li>{description}: {amount}</li>"
+                services_html += "</ul>"
+            
+            return f"""
+            <html>
+                <body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333;">
+                    <div style="max-width: 600px; margin: 0 auto; padding: 20px;">
+                        <div style="text-align: center; margin-bottom: 30px;">
+                            <h1 style="color: #2c3e50; margin-bottom: 10px;">Monthly Invoice</h1>
+                            <p style="color: #7f8c8d; font-size: 16px;">Invoice #{invoice_number}</p>
+                        </div>
+                        
+                        <div style="background-color: #f8f9fa; padding: 20px; border-radius: 8px; margin-bottom: 30px;">
+                            <h2 style="color: #2c3e50; margin-bottom: 15px;">Dear {client_name},</h2>
+                            <p>We hope this message finds you well. Please find attached your monthly invoice for the billing period: <strong>{billing_period}</strong>.</p>
+                        </div>
+                        
+                        <div style="border: 1px solid #e9ecef; border-radius: 8px; padding: 20px; margin-bottom: 30px;">
+                            <h3 style="color: #2c3e50; margin-bottom: 15px;">Invoice Details</h3>
+                            <table style="width: 100%; border-collapse: collapse;">
+                                <tr>
+                                    <td style="padding: 10px 0; border-bottom: 1px solid #e9ecef;"><strong>Invoice Number:</strong></td>
+                                    <td style="padding: 10px 0; border-bottom: 1px solid #e9ecef; text-align: right;">{invoice_number}</td>
+                                </tr>
+                                <tr>
+                                    <td style="padding: 10px 0; border-bottom: 1px solid #e9ecef;"><strong>Billing Period:</strong></td>
+                                    <td style="padding: 10px 0; border-bottom: 1px solid #e9ecef; text-align: right;">{billing_period}</td>
+                                </tr>
+                                <tr>
+                                    <td style="padding: 10px 0; border-bottom: 1px solid #e9ecef;"><strong>Due Date:</strong></td>
+                                    <td style="padding: 10px 0; border-bottom: 1px solid #e9ecef; text-align: right;">{due_date}</td>
+                                </tr>
+                                <tr style="background-color: #f8f9fa;">
+                                    <td style="padding: 15px 0; font-size: 18px;"><strong>Total Amount Due:</strong></td>
+                                    <td style="padding: 15px 0; font-size: 18px; font-weight: bold; color: #e74c3c; text-align: right;">{amount_due}</td>
+                                </tr>
+                            </table>
+                        </div>
+                        
+                        {f'<div style="margin-bottom: 30px;"><h3 style="color: #2c3e50; margin-bottom: 15px;">Services Provided</h3>{services_html}</div>' if services else ''}
+                        
+                        <div style="background-color: #e8f5e8; padding: 20px; border-radius: 8px; border-left: 4px solid #28a745; margin-bottom: 30px;">
+                            <h3 style="color: #155724; margin-bottom: 10px;">Payment Information</h3>
+                            <p style="margin-bottom: 10px;">Please remit payment by <strong>{due_date}</strong> to avoid any late fees.</p>
+                            <p style="margin-bottom: 0;">If you have any questions regarding this invoice, please don't hesitate to contact our billing department.</p>
+                        </div>
+                        
+                        <div style="text-align: center; margin-top: 40px; padding-top: 20px; border-top: 1px solid #e9ecef;">
+                            <p style="color: #7f8c8d; font-size: 14px; margin-bottom: 10px;">Thank you for your business!</p>
+                            <p style="color: #7f8c8d; font-size: 12px;">This is an automated message. Please do not reply directly to this email.</p>
+                        </div>
+                    </div>
+                </body>
+            </html>
+            """
+            
+        except Exception as e:
+            raise ValueError(f"Failed to generate monthly invoice template: {str(e)}")
+
 
     @staticmethod
     def _get_template_subject(template_name: str) -> str:
         """Get default subject for template"""
         subjects = {
-            'otp': 'Your Callsure AI Verification Code',
-            'welcome': 'Welcome to Callsure AI',
-            'password_reset': 'Reset Your Callsure AI Password',
-            'verification': 'Verify Your Callsure AI Account'
+            'otp': 'Your OTP Code',
+            'welcome': 'Welcome to Our Platform',
+            'password_reset': 'Reset Your Password',
+            'verification': 'Verify Your Email',
+            'monthly_invoice': 'Monthly Invoice - Payment Due'
         }
         
-        return subjects.get(template_name, "Callsure AI Notification")
+        return subjects.get(template_name, 'Important Message')
+
+
 
     @staticmethod
     def _get_otp_template(data: dict) -> str:
