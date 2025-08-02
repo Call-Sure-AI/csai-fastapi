@@ -353,7 +353,7 @@ class AuthHandler:
             )
             print(f'User: {signin_request.password.encode("utf-8")}')
 
-            print(f'User: {   user['access_token'].encode('utf-8')}')
+            print(f'User: {user["access_token"].encode("utf-8")}')
             
             if not is_valid_password:
                 raise HTTPException(status_code=401, detail="Invalid credentials")
