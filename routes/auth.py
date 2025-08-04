@@ -18,6 +18,7 @@ async def google_auth(auth_request: GoogleAuthRequest, response: Response):
 async def check_email(email_request: EmailCheckRequest):
     return await AuthHandler.check_email(email_request)
 
+
 @router.post("/signup", response_model=AuthResponse)
 async def sign_up(signup_request: SignUpRequest, response: Response):
     return await AuthHandler.sign_up(signup_request, response)
