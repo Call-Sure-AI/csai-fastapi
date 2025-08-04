@@ -5,6 +5,95 @@ from datetime import datetime
 import re
 from enum import Enum
 
+class IntegrationType(str, Enum):
+    WHATSAPP = "whatsapp"
+    GOOGLE = "google" 
+    FACEBOOK = "facebook"
+    INSTAGRAM = "instagram"
+    TELEGRAM = "telegram"
+    SLACK = "slack"
+    DISCORD = "discord"
+    EMAIL = "email"
+    SMS = "sms"
+    WEBHOOK = "webhook"
+    API = "api"
+    CUSTOM = "custom"
+
+
+class IntegrationStatus(str, Enum):
+    ACTIVE = "active"
+    INACTIVE = "inactive"
+    PENDING = "pending"
+    ERROR = "error"
+    EXPIRED = "expired"
+    SUSPENDED = "suspended"
+
+
+class IntegrationBase(BaseModel):
+    name: str = Field(..., min_length=1, max_length=255)
+    type: IntegrationType = Field(..., description="Type of integration - used to segregate integrations")
+    description: Optional[str] = Field(None, max_length=500)
+    is_active: bool = Field(default=True)
+    status: IntegrationStatus = Field(default=IntegrationStatus.ACTIVE)
+
+    config: Dict[str, Any] = Field(default_factory=dict, description="All integration-specific configuration")
+
+    webhook_url: Optional[HttpUrl] = None
+    expires_at: Optional[datetime] = None
+    last_sync_at: Optional[datetime] = None
+    tags: List[str] = Field(default_factory=list)
+
+    last_error: Optional[str] = None
+    error_count: int = Field(default=0, ge=0)
+
+
+class IntegrationCreate(IntegrationBase):
+    company_id: str = Field(..., description="Company this integration belongs to")
+
+
+class IntegrationUpdate(BaseModel):
+    name: Optional[str] = Field(None, min_length=1, max_length=255)
+    description: Optional[str] = Field(None, max_length=500)
+    is_active: Optional[bool] = None
+    status: Optional[IntegrationStatus] = None
+    config: Optional[Dict[str, Any]] = None
+    webhook_url: Optional[HttpUrl] = None
+    expires_at: Optional[datetime] = None
+    tags: Optional[List[str]] = None
+
+
+class Integration(IntegrationBase):
+    id: str
+    company_id: str
+    user_id: str
+    created_at: datetime
+    updated_at: datetime
+    
+    class Config:
+        from_attributes = True
+
+
+class IntegrationResponse(BaseModel):
+    id: str
+    name: str
+    type: IntegrationType
+    description: Optional[str] = None
+    is_active: bool
+    status: IntegrationStatus
+    webhook_url: Optional[str] = None
+    expires_at: Optional[datetime] = None
+    last_sync_at: Optional[datetime] = None
+    tags: List[str]
+    created_at: datetime
+    updated_at: datetime
+
+
+class IntegrationListResponse(BaseModel):
+    integrations: List[IntegrationResponse]
+    total: int
+    page: int = 1
+    per_page: int = 20
+
 class GoogleAuthRequest(BaseModel):
     idToken: str
 
@@ -159,7 +248,7 @@ class CompanyBase(BaseModel):
     prompt_templates: Optional[Dict[str, Any]] = None
     phone_number: Optional[str] = None
     settings: Optional[CompanySettings] = None
-    
+
     @field_validator('phone_number')
     @classmethod
     def validate_phone_number(cls, v):
@@ -170,7 +259,6 @@ class CompanyBase(BaseModel):
         return v
     
     def to_db_dict(self) -> Dict[str, Any]:
-        """Convert to dictionary suitable for database operations"""
         data = self.model_dump()
 
         if data.get('website'):
