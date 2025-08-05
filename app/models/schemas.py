@@ -268,13 +268,21 @@ class CompanyBase(BaseModel):
                 raise ValueError('Invalid phone number format')
         return v
     
-    def to_db_dict(self) -> Dict[str, Any]:
-        data = self.model_dump()
-
-        if data.get('website'):
+    def model_dump(self, **kwargs) -> Dict[str, Any]:
+        """Override model_dump to convert HttpUrl to string"""
+        data = super().model_dump(**kwargs)
+        
+        # Convert HttpUrl fields to strings
+        if 'website' in data and data['website']:
             data['website'] = str(data['website'])
+        if 'logo' in data and data['logo']:
+            data['logo'] = str(data['logo'])
             
         return data
+    
+    def to_db_dict(self) -> Dict[str, Any]:
+        """This method is now redundant but kept for backward compatibility"""
+        return self.model_dump()
 
 class CompanyCreate(CompanyBase):
     pass

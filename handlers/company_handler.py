@@ -138,9 +138,16 @@ class CompanyHandler:
             connection = await get_db_connection()
             async with connection as conn:
                 logger.info("Database connection established")
-                company = await self.company_queries.create_company(conn, company_data, user_id, api_key)
+                
+                # Convert company_data to database-friendly format
+                company_dict = company_data.to_db_dict()
+                
+                # Create a new CompanyCreate instance with converted data
+                db_company_data = CompanyCreate(**company_dict)
+                
+                company = await self.company_queries.create_company(conn, db_company_data, user_id, api_key)
                 logger.info(f"Company created successfully: {company.get('id')}")
-
+                
                 try:
                     await self.activity_logger.log({
                         'user_id': user_id,
@@ -155,14 +162,14 @@ class CompanyHandler:
                     })
                 except Exception as log_error:
                     logger.warning(f'Failed to log company creation activity: {log_error}')
-
+                
                 parsed_company = self._parse_json_fields(company)
                 logger.info("Company creation completed successfully")
                 return parsed_company
                 
         except Exception as error:
             logger.error(f"Error creating company: {error}", exc_info=True)
-
+            
             error_str = str(error).lower()
             if "unique constraint" in error_str or "duplicate key" in error_str:
                 raise ValueError("Email or phone number already exists")
@@ -184,8 +191,19 @@ class CompanyHandler:
                 
                 if existing_company:
                     logger.info(f"Updating existing company: {existing_company['id']}")
-
-                    update_data = CompanyUpdate(**company_data.model_dump(exclude_unset=True))
+                    
+                    # Convert to database-friendly format - get dict with strings
+                    update_dict = company_data.model_dump(exclude_unset=True)
+                    
+                    # Convert HttpUrl fields to strings
+                    if 'website' in update_dict and update_dict['website']:
+                        update_dict['website'] = str(update_dict['website'])
+                    if 'logo' in update_dict and update_dict['logo']:
+                        update_dict['logo'] = str(update_dict['logo'])
+                    
+                    # Now create CompanyUpdate with the converted values
+                    update_data = CompanyUpdate.model_validate(update_dict)
+                    
                     company = await self.company_queries.update_company(
                         conn, existing_company['id'], update_data, user_id
                     )
@@ -197,7 +215,7 @@ class CompanyHandler:
                             'entity_type': 'COMPANY',
                             'entity_id': existing_company['id'],
                             'metadata': {
-                                'updated_fields': update_data.model_dump(exclude_unset=True)
+                                'updated_fields': update_dict
                             }
                         })
                     except Exception as log_error:
@@ -210,7 +228,17 @@ class CompanyHandler:
                 else:
                     logger.info("Creating new company")
                     api_key = secrets.token_hex(32)
-                    company = await self.company_queries.create_company(conn, company_data, user_id, api_key)
+                    
+                    # For creation, also convert HttpUrl to string
+                    create_dict = company_data.model_dump()
+                    if 'website' in create_dict and create_dict['website']:
+                        create_dict['website'] = str(create_dict['website'])
+                    if 'logo' in create_dict and create_dict['logo']:
+                        create_dict['logo'] = str(create_dict['logo'])
+                    
+                    db_company_data = CompanyCreate.model_validate(create_dict)
+                    
+                    company = await self.company_queries.create_company(conn, db_company_data, user_id, api_key)
                     logger.info(f"Company created successfully: {company.get('id')}")
                     
                     try:
@@ -234,7 +262,7 @@ class CompanyHandler:
                     
         except Exception as error:
             logger.error(f"Error creating/updating company: {error}", exc_info=True)
-
+            
             error_str = str(error).lower()
             if "unique constraint" in error_str or "duplicate key" in error_str:
                 raise ValueError("Email or phone number already exists")
@@ -253,8 +281,14 @@ class CompanyHandler:
                 
                 if not company:
                     raise ValueError("Company not found")
-            
-                updated_company = await self.company_queries.update_company(conn, company_id, company_data, user_id)
+                
+                # Convert company_data to database-friendly format
+                company_dict = company_data.to_db_dict()
+                
+                # Create a new CompanyUpdate instance with converted data
+                db_company_data = CompanyUpdate(**company_dict)
+                
+                updated_company = await self.company_queries.update_company(conn, company_id, db_company_data, user_id)
                 
                 try:
                     await self.activity_logger.log({
@@ -263,7 +297,7 @@ class CompanyHandler:
                         'entity_type': 'COMPANY',
                         'entity_id': company_id,
                         'metadata': {
-                            'updated_fields': company_data.dict(exclude_unset=True)
+                            'updated_fields': company_dict  # Use the converted dict here
                         }
                     })
                 except Exception as log_error:
@@ -275,8 +309,13 @@ class CompanyHandler:
             raise
         except Exception as error:
             logger.error(f"Error updating company: {error}")
-            if "unique constraint" in str(error).lower() or "duplicate key" in str(error).lower():
+            error_str = str(error).lower()  # Define error_str here
+            if "unique constraint" in error_str or "duplicate key" in error_str:
                 raise ValueError("Email or phone number already exists")
+            elif "invalid input" in error_str and "httpurl" in error_str:
+                raise ValueError("Invalid website URL format")
+            elif "not-null constraint" in error_str:
+                raise ValueError("Required field is missing. Please ensure all required fields are provided.")
             raise Exception("Internal server error")
 
     async def delete_company(self, company_id: str, user_id: str) -> Dict[str, Any]:
