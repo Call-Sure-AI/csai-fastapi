@@ -344,38 +344,31 @@ class AuthHandler:
     @staticmethod
     async def sign_in(signin_request: SignInRequest, response: Response) -> AuthResponse:
         try:
-            # Find user with credentials using the query class
-            user_query = UserQueries.GET_USER_WITH_CREDENTIALS
-            user = await postgres_client.client.execute_query(user_query, (signin_request.email,))
+            query, params = UserQueries.get_user_by_email_params(signin_request.email)
+            user = await postgres_client.client.execute_query(query, params)
             
             if not user:
                 raise HTTPException(status_code=404, detail="User not found")
             
             user = user[0]
 
-            # Verify password
-            is_valid_password = bcrypt.checkpw(
-                signin_request.password.encode('utf-8'),
-                user['access_token'].encode('utf-8')
-            )
-            print(f'User: {signin_request.password.encode("utf-8")}')
+            if signin_request.code:
+                await AuthHandler._verify_otp_for_signin(signin_request.email, signin_request.code)
+            elif signin_request.password:
+                await AuthHandler._verify_password_for_signin(user, signin_request.password)
+            else:
+                raise HTTPException(status_code=400, detail="Either password or OTP code is required")
 
-            print(f'User: {user["access_token"].encode("utf-8")}')
-            
-            if not is_valid_password:
-                raise HTTPException(status_code=401, detail="Invalid credentials")
-            
-            # Determine role
             role = await AuthHandler._get_user_role(user['id'])
-            
-            # Generate JWT token
+
             token = jwt.encode(
                 {
                     'id': str(user['id']),
                     'email': user['email'],
                     'role': role,
+                    'name': user['name'],
                     'image': user.get('image'),
-                    'exp': datetime.utcnow() + timedelta(days=1)
+                    'exp': datetime.utcnow() + timedelta(days=7)
                 },
                 os.getenv('JWT_SECRET', 'your-secret-key'),
                 algorithm='HS256'
@@ -388,14 +381,25 @@ class AuthHandler:
                 image=user.get('image'),
                 role=role
             )
-            
-            # Set cookies
-            response.set_cookie(key="token", value=token, httponly=True)
-            response.set_cookie(key="user", value=user_data.model_dump_json())
+
+            response.set_cookie(
+                key="token", 
+                value=token, 
+                httponly=True, 
+                secure=True, 
+                samesite='lax',
+                max_age=7 * 24 * 60 * 60
+            )
+            response.set_cookie(
+                key="user", 
+                value=user_data.model_dump_json(),
+                max_age=7 * 24 * 60 * 60
+            )
             
             return AuthResponse(
                 token=token,
-                user=user_data
+                user=user_data,
+                newUser=False
             )
             
         except HTTPException:
@@ -405,30 +409,67 @@ class AuthHandler:
             raise HTTPException(status_code=500, detail="Internal server error")
 
     @staticmethod
-    async def get_profile(userId: str) -> UserResponse:
-        try:
-            query, params = UserQueries.get_user_by_id_params(userId)
-            user = await postgres_client.client.execute_query(query, params)
-            
-            if not user:
-                raise HTTPException(status_code=404, detail="User not found")
-            
-            user = user[0]
-            role = await AuthHandler._get_user_role(user['id'])
-            
-            return UserResponse(
-                id=str(user['id']),
-                name=user['name'],
-                email=user['email'],
-                image=user.get('image'),
-                role=role
-            )
-            
-        except HTTPException:
-            raise
-        except Exception as error:
-            print(f'Get profile error: {error}')
-            raise HTTPException(status_code=500, detail="Internal server error")
+    async def _verify_password_for_signin(user: dict, password: str):
+        """Verify password for existing user"""
+        # Get user credentials
+        user_query = UserQueries.GET_USER_WITH_CREDENTIALS
+        user_with_creds = await postgres_client.client.execute_query(user_query, (user['email'],))
+        
+        if not user_with_creds:
+            raise HTTPException(status_code=401, detail="Invalid credentials")
+        
+        user_creds = user_with_creds[0]
+        
+        # Verify password
+        is_valid_password = bcrypt.checkpw(
+            password.encode('utf-8'),
+            user_creds['access_token'].encode('utf-8')
+        )
+        
+        if not is_valid_password:
+            raise HTTPException(status_code=401, detail="Invalid credentials")
+
+    @staticmethod
+    async def _verify_otp_for_signin(email: str, code: str):
+        query, params = OTPQueries.get_valid_otp_params(email, code)
+        otps = await postgres_client.client.execute_query(query, params)
+        
+        if not otps:
+            raise HTTPException(status_code=400, detail="Invalid or expired OTP")
+        
+        otp_record = otps[0]
+        
+        if otp_record['code'] != code:
+            raise HTTPException(status_code=400, detail="Invalid or expired OTP")
+
+        query, params = OTPQueries.delete_otp_by_id_params(otp_record['id'])
+        await postgres_client.client.execute_update(query, params)
+
+        @staticmethod
+        async def get_profile(userId: str) -> UserResponse:
+            try:
+                query, params = UserQueries.get_user_by_id_params(userId)
+                user = await postgres_client.client.execute_query(query, params)
+                
+                if not user:
+                    raise HTTPException(status_code=404, detail="User not found")
+                
+                user = user[0]
+                role = await AuthHandler._get_user_role(user['id'])
+                
+                return UserResponse(
+                    id=str(user['id']),
+                    name=user['name'],
+                    email=user['email'],
+                    image=user.get('image'),
+                    role=role
+                )
+                
+            except HTTPException:
+                raise
+            except Exception as error:
+                print(f'Get profile error: {error}')
+                raise HTTPException(status_code=500, detail="Internal server error")
 
     @staticmethod
     async def _get_user_role(userId: str) -> str:

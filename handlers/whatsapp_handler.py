@@ -195,7 +195,7 @@ class WhatsAppHandler:
                 }
                 
                 integration_query = text("""
-                    INSERT INTO integrations (
+                    INSERT INTO "Integration" (
                         id, company_id, user_id, name, type, description, is_active, 
                         status, config, webhook_url, expires_at, last_sync_at, tags,
                         last_error, error_count, created_at, updated_at
