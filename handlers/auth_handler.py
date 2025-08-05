@@ -49,7 +49,7 @@ class AuthHandler:
             
             # Find existing user
             query, params = UserQueries.get_user_by_email_params(email)
-            user = postgres_client.client.execute_query(query, params)
+            user = await postgres_client.client.execute_query(query, params)
             user = user[0] if user else None
             
             if not user:
@@ -63,26 +63,26 @@ class AuthHandler:
                     google_id, auth_request.idToken
                 )
                 
-                results = postgres_client.client.execute_transaction(transaction_queries)
+                results = await postgres_client.client.execute_transaction(transaction_queries)
                 user = results[0][0] if results[0] else None
                 
             else:
                 # Check if Google account exists
                 query, params = AccountQueries.get_google_account_params(user['id'])
-                accounts = postgres_client.client.execute_query(query, params)
+                accounts = await postgres_client.client.execute_query(query, params)
                 
                 if not accounts:
                     # Link Google account
                     query, params = AccountQueries.create_google_account_params(
                         user['id'], google_id, auth_request.idToken
                     )
-                    postgres_client.client.execute_update(query, params)
+                    await postgres_client.client.execute_update(query, params)
             
             if not user:
                 raise HTTPException(status_code=500, detail="Failed to create or find user")
             
             # Determine user role
-            role = AuthHandler._get_user_role(user['id'])
+            role = await AuthHandler._get_user_role(user['id'])
             
             # Generate JWT token
             token = jwt.encode(
@@ -143,7 +143,7 @@ class AuthHandler:
     async def check_email(email_request: EmailCheckRequest) -> EmailCheckResponse:
         try:
             query, params = UserQueries.get_user_by_email_params(email_request.email)
-            user = postgres_client.client.execute_query(query, params)
+            user = await postgres_client.client.execute_query(query, params)
             
             return EmailCheckResponse(exists=bool(user))
             
@@ -156,7 +156,7 @@ class AuthHandler:
         try:
             # Check if user exists
             query, params = UserQueries.get_user_by_email_params(signup_request.email)
-            existing_user = postgres_client.client.execute_query(query, params)
+            existing_user = await postgres_client.client.execute_query(query, params)
             
             if existing_user:
                 raise HTTPException(status_code=400, detail="User already exists")
@@ -170,7 +170,7 @@ class AuthHandler:
                 userId, signup_request.email, signup_request.name, hashed_password
             )
             
-            results = postgres_client.client.execute_transaction(transaction_queries)
+            results = await postgres_client.client.execute_transaction(transaction_queries)
             user = results[0][0] if results[0] else None
             
             if not user:
@@ -222,7 +222,7 @@ class AuthHandler:
                 otp_request.email, code, expires_at
             )
             
-            postgres_client.client.execute_transaction(transaction_queries)
+            await postgres_client.client.execute_transaction(transaction_queries)
             
             # Send email
             await email_handler.send_otp_email(otp_request.email, code)
@@ -240,7 +240,7 @@ class AuthHandler:
             # Find valid OTP
             query, params = OTPQueries.get_valid_otp_params(otp_request.email, otp_request.code)
             print(f'Verify OTP query: {query}')
-            otps = postgres_client.client.execute_query(query, params)
+            otps = await postgres_client.client.execute_query(query, params)
             print(f'Verify OTP results: {otps}')
             
             if not otps:
@@ -251,15 +251,13 @@ class AuthHandler:
             if otp_record['code'] != otp_request.code:
                 raise HTTPException(status_code=400, detail="Invalid or expired OTP")
             
-            # Delete OTP
-            query, params = OTPQueries.delete_otp_by_id_params(otp_record['id'])
-            postgres_client.client.execute_update(query, params)
-            
             # Check if user exists
             query, params = UserQueries.get_user_by_email_params(otp_request.email)
-            user = postgres_client.client.execute_query(query, params)
+            user = await postgres_client.client.execute_query(query, params)
             user = user[0] if user else None
             new_user = False
+
+            print(f'User: {user}')
             
             if not user:
                 new_user = True
@@ -276,14 +274,14 @@ class AuthHandler:
                     userId, otp_request.email, otp_request.email.split('@')[0], jwt_token
                 )
                 
-                results = postgres_client.client.execute_transaction(transaction_queries)
+                results = await postgres_client.client.execute_transaction(transaction_queries)
                 user = results[0][0] if results[0] else None
             
             if not user:
                 raise HTTPException(status_code=500, detail="User creation failed")
             
             # Determine role
-            role = 'admin' if new_user else AuthHandler._get_user_role(user['id'])
+            role = 'admin' if new_user else await AuthHandler._get_user_role(user['id'])
             
             # Generate JWT token
             token = jwt.encode(
@@ -321,6 +319,10 @@ class AuthHandler:
                 value=user_data.model_dump_json(),
                 max_age=7 * 24 * 60 * 60
             )
+
+            # Delete OTP
+            query, params = OTPQueries.delete_otp_by_id_params(otp_record['id'])
+            await postgres_client.client.execute_update(query, params)
             
             return AuthResponse(
                 token=token,
@@ -339,7 +341,7 @@ class AuthHandler:
         try:
             # Find user with credentials using the query class
             user_query = UserQueries.GET_USER_WITH_CREDENTIALS
-            user = postgres_client.client.execute_query(user_query, (signin_request.email,))
+            user = await postgres_client.client.execute_query(user_query, (signin_request.email,))
             
             if not user:
                 raise HTTPException(status_code=404, detail="User not found")
@@ -359,7 +361,7 @@ class AuthHandler:
                 raise HTTPException(status_code=401, detail="Invalid credentials")
             
             # Determine role
-            role = AuthHandler._get_user_role(user['id'])
+            role = await AuthHandler._get_user_role(user['id'])
             
             # Generate JWT token
             token = jwt.encode(
@@ -401,13 +403,13 @@ class AuthHandler:
     async def get_profile(userId: str) -> UserResponse:
         try:
             query, params = UserQueries.get_user_by_id_params(userId)
-            user = postgres_client.client.execute_query(query, params)
+            user = await postgres_client.client.execute_query(query, params)
             
             if not user:
                 raise HTTPException(status_code=404, detail="User not found")
             
             user = user[0]
-            role = AuthHandler._get_user_role(user['id'])
+            role = await AuthHandler._get_user_role(user['id'])
             
             return UserResponse(
                 id=str(user['id']),
@@ -424,18 +426,18 @@ class AuthHandler:
             raise HTTPException(status_code=500, detail="Internal server error")
 
     @staticmethod
-    def _get_user_role(userId: str) -> str:
+    async def _get_user_role(userId: str) -> str:
         """Helper method to determine user role using query classes"""
         # Check if user owns any companies
         query, params = CompanyQueries.count_companies_by_owner_params(userId)
-        company_results = postgres_client.client.execute_query(query, params)
+        company_results = await postgres_client.client.execute_query(query, params)
         
         if company_results and company_results[0]['count'] > 0:
             return 'admin'
         
         # Check company memberships
         query, params = CompanyQueries.get_user_first_membership_params(userId)
-        membership_results = postgres_client.client.execute_query(query, params)
+        membership_results = await postgres_client.client.execute_query(query, params)
         
         if membership_results:
             return membership_results[0]['role']

@@ -6,50 +6,50 @@ class OTPQueries:
     
     GET_VALID_OTP = """
         SELECT * FROM "OTP" 
-        WHERE email = %s AND code = %s AND "expiresAt" > %s
+        WHERE email = $1 AND code = $2 AND "expiresAt" > $3
     """
     
     GET_OTP_BY_EMAIL = """
         SELECT * FROM "OTP" 
-        WHERE email = %s
+        WHERE email = $1
         ORDER BY "createdAt" DESC
     """
     
     GET_OTP_BY_ID = """
-        SELECT * FROM "OTP" WHERE id = %s
+        SELECT * FROM "OTP" WHERE id = $1
     """
     
     GET_EXPIRED_OTPS = """
-        SELECT * FROM "OTP" WHERE "expiresAt" < %s
+        SELECT * FROM "OTP" WHERE "expiresAt" < $1
     """
     
     CREATE_OTP = """
         INSERT INTO "OTP" (email, code, "expiresAt") 
-        VALUES (%s, %s, %s)
+        VALUES ($1, $2, $3)
         RETURNING *
     """
     
     CREATE_OTP_WITH_ID = """
         INSERT INTO "OTP" (id, email, code, "expiresAt") 
-        VALUES (%s, %s, %s, %s)
+        VALUES ($1, $2, $3, $4)
         RETURNING *
     """
     
     DELETE_OTP_BY_ID = """
-        DELETE FROM "OTP" WHERE id = %s
+        DELETE FROM "OTP" WHERE id = $1
     """
     
     DELETE_OTPS_BY_EMAIL = """
-        DELETE FROM "OTP" WHERE email = %s
+        DELETE FROM "OTP" WHERE email = $1
     """
     
     DELETE_EXPIRED_OTPS = """
-        DELETE FROM "OTP" WHERE "expiresAt" < %s
+        DELETE FROM "OTP" WHERE "expiresAt" < $1
     """
     
     CLEANUP_OLD_OTPS = """
         DELETE FROM "OTP" 
-        WHERE "createdAt" < %s
+        WHERE "createdAt" < $1
     """
 
     @staticmethod

@@ -5,44 +5,44 @@ class SessionQueries:
     """All SQL queries related to Session table"""
     
     GET_SESSION_BY_TOKEN = """
-        SELECT * FROM "Session" WHERE "sessionToken" = %s
+        SELECT * FROM "Session" WHERE "sessionToken" = $1
     """
     
     GET_SESSIONS_BY_USER = """
         SELECT * FROM "Session" 
-        WHERE "userId" = %s 
+        WHERE "userId" = $1 
         ORDER BY "createdAt" DESC
     """
     
     GET_VALID_SESSIONS = """
         SELECT * FROM "Session" 
-        WHERE "userId" = %s AND expires > %s
+        WHERE "userId" = $1 AND expires > $2
         ORDER BY "createdAt" DESC
     """
     
     CREATE_SESSION = """
         INSERT INTO "Session" ("sessionToken", "userId", expires) 
-        VALUES (%s, %s, %s) 
+        VALUES ($1, $2, $3) 
         RETURNING *
     """
     
     UPDATE_SESSION_EXPIRY = """
         UPDATE "Session" 
-        SET expires = %s, "updatedAt" = CURRENT_TIMESTAMP 
-        WHERE "sessionToken" = %s
+        SET expires = $1, "updatedAt" = CURRENT_TIMESTAMP 
+        WHERE "sessionToken" = $2
         RETURNING *
     """
     
     DELETE_SESSION = """
-        DELETE FROM "Session" WHERE "sessionToken" = %s
+        DELETE FROM "Session" WHERE "sessionToken" = $1
     """
     
     DELETE_SESSIONS_BY_USER = """
-        DELETE FROM "Session" WHERE "userId" = %s
+        DELETE FROM "Session" WHERE "userId" = $1
     """
     
     DELETE_EXPIRED_SESSIONS = """
-        DELETE FROM "Session" WHERE expires < %s
+        DELETE FROM "Session" WHERE expires < $1
     """
     
     CLEANUP_EXPIRED_SESSIONS = """

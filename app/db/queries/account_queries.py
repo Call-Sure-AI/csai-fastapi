@@ -4,38 +4,38 @@ class AccountQueries:
     """All SQL queries related to Account table"""
     
     GET_ACCOUNTS_BY_USER_ID = """
-        SELECT * FROM "Account" WHERE "userId" = %s
+        SELECT * FROM "Account" WHERE "userId" = $1
     """
     
     GET_ACCOUNT_BY_PROVIDER = """
         SELECT * FROM "Account" 
-        WHERE "userId" = %s AND provider = %s
+        WHERE "userId" = $1 AND provider = $2
     """
     
     GET_GOOGLE_ACCOUNT = """
         SELECT * FROM "Account" 
-        WHERE "userId" = %s AND provider = 'google'
+        WHERE "userId" = $1 AND provider = 'google'
     """
     
     GET_CREDENTIALS_ACCOUNT = """
         SELECT * FROM "Account" 
-        WHERE "userId" = %s AND provider = 'credentials'
+        WHERE "userId" = $1 AND provider = 'credentials'
     """
     
     GET_ACCOUNT_BY_PROVIDER_ID = """
         SELECT * FROM "Account" 
-        WHERE provider = %s AND "providerAccountId" = %s
+        WHERE provider = $1 AND "providerAccountId" = $2
     """
     
     CREATE_OAUTH_ACCOUNT = """
         INSERT INTO "Account" ("userId", type, provider, "providerAccountId", "access_token") 
-        VALUES (%s, %s, %s, %s, %s) 
+        VALUES ($1, $2, $3, $4, $5) 
         RETURNING *
     """
     
     CREATE_CREDENTIALS_ACCOUNT = """
         INSERT INTO "Account" ("userId", type, provider, "providerAccountId", "access_token")
-        VALUES (%s, %s, %s, %s, %s)
+        VALUES ($1, $2, $3, $4, $5)
         RETURNING *
     """
     
@@ -44,42 +44,42 @@ class AccountQueries:
             "userId", type, provider, "providerAccountId", 
             "access_token", "refresh_token", "expires_at", "token_type", scope, "id_token"
         ) 
-        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s) 
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) 
         RETURNING *
     """
     
     UPDATE_ACCESS_TOKEN = """
         UPDATE "Account" 
-        SET "access_token" = %s, "updatedAt" = CURRENT_TIMESTAMP 
-        WHERE "userId" = %s AND provider = %s
+        SET "access_token" = $1, "updatedAt" = CURRENT_TIMESTAMP 
+        WHERE "userId" = $2 AND provider = $3
         RETURNING *
     """
     
     UPDATE_REFRESH_TOKEN = """
         UPDATE "Account" 
-        SET "refresh_token" = %s, "expires_at" = %s, "updatedAt" = CURRENT_TIMESTAMP 
-        WHERE "userId" = %s AND provider = %s
+        SET "refresh_token" = $1, "expires_at" = $2, "updatedAt" = CURRENT_TIMESTAMP 
+        WHERE "userId" = $3 AND provider = $4
         RETURNING *
     """
     
     UPDATE_OAUTH_TOKENS = """
         UPDATE "Account" 
-        SET "access_token" = %s, "refresh_token" = %s, "expires_at" = %s, 
-            "token_type" = %s, scope = %s, "id_token" = %s, "updatedAt" = CURRENT_TIMESTAMP
-        WHERE "userId" = %s AND provider = %s
+        SET "access_token" = $1, "refresh_token" = $2, "expires_at" = $3, 
+            "token_type" = $4, scope = $5, "id_token" = $6, "updatedAt" = CURRENT_TIMESTAMP
+        WHERE "userId" = $7 AND provider = $8
         RETURNING *
     """
     
     DELETE_ACCOUNT_BY_PROVIDER = """
-        DELETE FROM "Account" WHERE provider = %s AND "providerAccountId" = %s
+        DELETE FROM "Account" WHERE provider = $1 AND "providerAccountId" = $2
     """
     
     DELETE_ACCOUNTS_BY_USER = """
-        DELETE FROM "Account" WHERE "userId" = %s
+        DELETE FROM "Account" WHERE "userId" = $1
     """
     
     DELETE_ACCOUNT_BY_USER_PROVIDER = """
-        DELETE FROM "Account" WHERE "userId" = %s AND provider = %s
+        DELETE FROM "Account" WHERE "userId" = $1 AND provider = $2
     """
 
     @staticmethod

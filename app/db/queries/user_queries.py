@@ -4,26 +4,26 @@ class UserQueries:
     """All SQL queries related to User table"""
     
     GET_USER_BY_EMAIL = """
-        SELECT * FROM "User" WHERE email = %s
+        SELECT * FROM "User" WHERE email = $1
     """
     
     GET_USER_BY_ID = """
-        SELECT * FROM "User" WHERE id = %s
+        SELECT * FROM "User" WHERE id = $1
     """
     
     GET_USER_PROFILE = """
-        SELECT id, name, email, image, "createdAt", "updatedAt" FROM "User" WHERE id = %s
+        SELECT id, name, email, image, "createdAt", "updatedAt" FROM "User" WHERE id = $1
     """
     
     GET_USER_WITH_CREDENTIALS = """
         SELECT u.*, a."access_token" 
         FROM "User" u
         JOIN "Account" a ON u.id = a."userId"
-        WHERE u.email = %s AND a.provider = 'credentials'
+        WHERE u.email = $1 AND a.provider = 'credentials'
     """
     
     CHECK_USER_EXISTS_BY_EMAIL = """
-        SELECT id FROM "User" WHERE email = %s
+        SELECT id FROM "User" WHERE email = $1
     """
     
     GET_USER_WITH_COMPANIES = """
@@ -42,7 +42,7 @@ class UserQueries:
                ) as owned_companies
         FROM "User" u
         LEFT JOIN "Company" c ON u.id = c."user_id"
-        WHERE u.id = %s
+        WHERE u.id = $1
         GROUP BY u.id
     """
     
@@ -62,51 +62,51 @@ class UserQueries:
         FROM "User" u
         LEFT JOIN "CompanyMember" cm ON u.id = cm."user_id"
         LEFT JOIN "Company" comp ON cm."company_id" = comp.id
-        WHERE u.id = %s
+        WHERE u.id = $1
         GROUP BY u.id
     """
     
     # INSERT queries
     CREATE_USER = """
         INSERT INTO "User" (id, email, name, image, "emailVerified") 
-        VALUES (%s, %s, %s, %s, %s) 
+        VALUES ($1, $2, $3, $4, $5) 
         RETURNING *
     """
     
     CREATE_USER_BASIC = """
         INSERT INTO "User" (id, email, name) 
-        VALUES (%s, %s, %s) 
+        VALUES ($1, $2, $3) 
         RETURNING *
     """
     
     # UPDATE queries
     UPDATE_USER_EMAIL_VERIFIED = """
         UPDATE "User" 
-        SET "emailVerified" = %s, "updatedAt" = CURRENT_TIMESTAMP 
-        WHERE id = %s
+        SET "emailVerified" = $1, "updatedAt" = CURRENT_TIMESTAMP 
+        WHERE id = $2
         RETURNING *
     """
     
     UPDATE_USER_PROFILE = """
         UPDATE "User" 
-        SET name = %s, image = %s, "updatedAt" = CURRENT_TIMESTAMP 
-        WHERE id = %s
+        SET name = $1, image = $2, "updatedAt" = CURRENT_TIMESTAMP 
+        WHERE id = $3
         RETURNING *
     """
     
     UPDATE_USER_NAME = """
         UPDATE "User" 
-        SET name = %s, "updatedAt" = CURRENT_TIMESTAMP 
-        WHERE id = %s
+        SET name = $1, "updatedAt" = CURRENT_TIMESTAMP 
+        WHERE id = $2
         RETURNING *
     """
     
     DELETE_USER_BY_ID = """
-        DELETE FROM "User" WHERE id = %s
+        DELETE FROM "User" WHERE id = $1
     """
     
     DELETE_USER_BY_EMAIL = """
-        DELETE FROM "User" WHERE email = %s
+        DELETE FROM "User" WHERE email = $1
     """
 
     @staticmethod
