@@ -48,7 +48,7 @@ async def get_companies_by_user_id(
         logger.error(f"Error in get_companies_by_user_id: {e}")
         raise HTTPException(status_code=500, detail="Internal server error")
 
-@router.post("/create-or-update", response_model=Company, status_code=201)
+@router.post("/create", response_model=Company, status_code=201)
 async def create_company(
     company_data: CompanyCreate,
     current_user: UserResponse = Depends(get_current_user),
@@ -71,7 +71,7 @@ async def create_company(
         logger.error(f"Error in create_company: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail="Internal server error")
 
-#@router.post("/create-or-update", response_model=Company)
+@router.post("/create-or-update", response_model=Company)
 async def create_or_update_company(
     company_data: CompanyCreate,
     current_user: dict = Depends(get_current_user)
