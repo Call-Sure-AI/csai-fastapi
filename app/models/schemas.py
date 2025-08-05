@@ -1,5 +1,5 @@
 import uuid
-from pydantic import BaseModel, Field, EmailStr, HttpUrl, field_validator
+from pydantic import BaseModel, Field, EmailStr, HttpUrl, field_validator, validator
 from typing import Optional, Dict, List, Any, Literal
 from datetime import datetime
 import re
@@ -112,9 +112,19 @@ class SignInRequest(BaseModel):
 class GenerateOTPRequest(BaseModel):
     email: EmailStr
 
-class VerifyOTPRequest(BaseModel):
-    email: EmailStr
-    code: str
+class SignInRequest(BaseModel):
+    email: str
+    password: Optional[str] = None
+    code: Optional[str] = None
+    
+    @validator('password')
+    def validate_auth_method(cls, password, values):
+        code = values.get('code')
+        if not password and not code:
+            raise ValueError('Either password or OTP code must be provided')
+        if password and code:
+            raise ValueError('Provide either password or OTP code, not both')
+        return password
 
 class UserResponse(BaseModel):
     id: str
@@ -306,6 +316,10 @@ class TemplateEmailRequest(BaseModel):
     template_data: Dict[str, Any]
     subject: Optional[str] = None
 
+class VerifyOTPRequest(BaseModel):
+    email: str
+    code: str
+    
 class OTPEmailRequest(BaseModel):
     email: EmailStr
     code: str

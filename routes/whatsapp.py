@@ -1,5 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, Request, Query
 from fastapi.responses import PlainTextResponse
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 from typing import Optional
 from app.db.postgres_client import get_db_connection
@@ -32,30 +33,35 @@ onboarding_helper = WhatsAppOnboardingHelper()
 @router.post("/onboard")
 async def onboard_whatsapp(
     data: WhatsAppOnboardRequest,
-    db: AsyncSession = Depends(get_db_connection),
+    db_context = Depends(get_db_connection),
     current_user: UserResponse = Depends(get_current_user)
 ):
     try:
         logger.info(f"Onboarding request from user {current_user.id} for business {data.business_id}")
 
-        company_query = text("SELECT id FROM companies WHERE user_id = :user_id LIMIT 1")
-        company_result = await db.execute(company_query, {"user_id": current_user.id})
-        company_row = company_result.fetchone()
-        
-        company_id = company_row.id if company_row else None
+        async with db_context as db:
+            company_query_str = 'SELECT id FROM "Company" WHERE user_id = $1 LIMIT 1'
+            company_row = await db.fetchrow(company_query_str, current_user.id)
 
-        result = await handler.onboard(db, data, current_user.id, company_id)
-        
-        if "error" in result:
-            raise HTTPException(status_code=400, detail=result["error"])
-        
-        return result
+            company_id = company_row['id'] if company_row else None
+
+            result = await handler.onboard(db, data, current_user.id, company_id)
+            
+            if "error" in result:
+                raise HTTPException(status_code=400, detail=result["error"])
+            
+            return result
         
     except HTTPException:
         raise
     except Exception as e:
+        import traceback
         logger.error(f"Unexpected error in onboard_whatsapp: {str(e)}")
+        logger.error(f"Error type: {type(e)}")
+        logger.error(f"Full traceback:\n{traceback.format_exc()}")
         raise HTTPException(status_code=500, detail="Internal server error")
+
+
 
 @router.post("/start-onboarding")
 async def start_onboarding(
