@@ -73,11 +73,12 @@ async def create_company(
 
 @router.post("/create-or-update", response_model=Company)
 async def create_or_update_company(
-    company_data: CompanyCreate,
-    current_user: dict = Depends(get_current_user)
+    company_data: CompanyCreate = Body(...),
+    current_user: UserResponse = Depends(get_current_user),
+    company_handler: CompanyHandler = Depends(CompanyHandler)
 ):
     try:
-        user_id = current_user["id"]
+        user_id = current_user.id
         company = await company_handler.create_or_update_company(company_data, user_id)
         return company
     except ValueError as e:

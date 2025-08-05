@@ -175,12 +175,19 @@ class CompanyHandler:
 
     async def create_or_update_company(self, company_data: CompanyCreate, user_id: str) -> Dict[str, Any]:
         try:
-            async with get_db_connection() as conn:
+            logger.info(f"Creating or updating company for user_id: {user_id}")
+            connection = await get_db_connection()
+            async with connection as conn:
+                logger.info("Database connection established")
+                
                 existing_company = await self.company_queries.get_company_by_user_id_single(conn, user_id)
                 
                 if existing_company:
+                    logger.info(f"Updating existing company: {existing_company['id']}")
+
+                    update_data = CompanyUpdate(**company_data.model_dump(exclude_unset=True))
                     company = await self.company_queries.update_company(
-                        conn, existing_company['id'], company_data, user_id
+                        conn, existing_company['id'], update_data, user_id
                     )
                     
                     try:
@@ -190,16 +197,21 @@ class CompanyHandler:
                             'entity_type': 'COMPANY',
                             'entity_id': existing_company['id'],
                             'metadata': {
-                                'updated_fields': company_data.dict(exclude_unset=True)
+                                'updated_fields': update_data.model_dump(exclude_unset=True)
                             }
                         })
                     except Exception as log_error:
-                        logger.error(f'Failed to log company update activity: {log_error}')
+                        logger.warning(f'Failed to log company update activity: {log_error}')
+
+                    parsed_company = self._parse_json_fields(company)
+                    logger.info("Company update completed successfully")
+                    return parsed_company
                     
-                    return company
                 else:
+                    logger.info("Creating new company")
                     api_key = secrets.token_hex(32)
                     company = await self.company_queries.create_company(conn, company_data, user_id, api_key)
+                    logger.info(f"Company created successfully: {company.get('id')}")
                     
                     try:
                         await self.activity_logger.log({
@@ -214,15 +226,24 @@ class CompanyHandler:
                             }
                         })
                     except Exception as log_error:
-                        logger.error(f'Failed to log company creation activity: {log_error}')
-                    
-                    return self._parse_json_fields(company)
+                        logger.warning(f'Failed to log company creation activity: {log_error}')
+
+                    parsed_company = self._parse_json_fields(company)
+                    logger.info("Company creation completed successfully")
+                    return parsed_company
                     
         except Exception as error:
-            logger.error(f"Error creating/updating company: {error}")
-            if "unique constraint" in str(error).lower() or "duplicate key" in str(error).lower():
+            logger.error(f"Error creating/updating company: {error}", exc_info=True)
+
+            error_str = str(error).lower()
+            if "unique constraint" in error_str or "duplicate key" in error_str:
                 raise ValueError("Email or phone number already exists")
-            raise Exception("Internal server error")
+            elif "invalid input" in error_str and "httpurl" in error_str:
+                raise ValueError("Invalid website URL format")
+            elif "violates not-null constraint" in error_str:
+                raise ValueError("Required field is missing")
+            else:
+                raise error
 
     async def update_company(self, company_id: str, company_data: CompanyUpdate, user_id: str) -> Dict[str, Any]:
         try:
