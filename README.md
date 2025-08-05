@@ -19,7 +19,7 @@ cd csai-fastapi
 2. Create and activate virtual environment
 ```bash
 python -m venv venv
-venv\Scripts\activate  # Windows
+.venv\Scripts\activate.bat  # Windows
 # or
 source venv/bin/activate  # Linux/Mac
 ```
