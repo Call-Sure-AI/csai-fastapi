@@ -68,6 +68,7 @@ class UserQueries:
     """
     
     CREATE_USER = """
+<<<<<<< HEAD
         INSERT INTO "User" (id, email, name, image, "emailVerified", "createdAt", "updatedAt") 
         VALUES ($1, $2, $3, $4, $5, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP) 
         RETURNING *
@@ -77,6 +78,16 @@ class UserQueries:
     CREATE_USER_WITH_TIMESTAMPS = """
         INSERT INTO "User" (id, email, name, image, "emailVerified", "createdAt", "updatedAt") 
         VALUES ($1, $2, $3, $4, $5, $6, $7) 
+=======
+        INSERT INTO "User" (id, email, name, image, "emailVerified") 
+        VALUES ($1, $2, $3, $4, $5) 
+        RETURNING *
+    """
+    
+    CREATE_USER_BASIC = """
+        INSERT INTO "User" (id, email, name) 
+        VALUES ($1, $2, $3) 
+>>>>>>> 96bee3d452de7d0f058473e83eb6eaeac9703abe
         RETURNING *
     """
     
