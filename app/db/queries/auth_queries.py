@@ -60,7 +60,6 @@ class AuthQueries:
     
     @staticmethod
     def get_user_role_queries(userId: str) -> Dict[str, Tuple[str, tuple]]:
-        """Get queries to determine user role"""
         return {
             'companies': CompanyQueries.count_companies_by_owner_params(userId),
             'membership': CompanyQueries.get_user_first_membership_params(userId)
@@ -83,10 +82,10 @@ class AuthQueries:
             ) as accounts
         FROM "User" u
         LEFT JOIN "Account" a ON u.id = a."userId"
-        WHERE u.id = %s
+        WHERE u.id = $1
         GROUP BY u.id
     """
-    
+
     GET_USER_COMPLETE_PROFILE = """
         SELECT 
             u.*,
@@ -117,9 +116,10 @@ class AuthQueries:
         LEFT JOIN "Company" c ON u.id = c."user_id"
         LEFT JOIN "CompanyMember" cm ON u.id = cm."user_id"
         LEFT JOIN "Company" comp ON cm."company_id" = comp.id
-        WHERE u.id = %s
+        WHERE u.id = $1
         GROUP BY u.id
     """
+
 
     @staticmethod
     def get_user_with_accounts_params(userId: str) -> Tuple[str, tuple]:

@@ -9,6 +9,24 @@ logger = logging.getLogger(__name__)
 
 class CompanyQueries:
     
+    @staticmethod
+    def count_companies_by_owner_params(user_id: str) -> tuple:
+        """Count companies owned by user"""
+        query = """
+            SELECT COUNT(*) as count FROM "Company" WHERE user_id = $1
+        """
+        return query, (user_id,)
+    
+    @staticmethod
+    def get_user_first_membership_params(user_id: str) -> tuple:
+        """Get user's first company membership"""
+        query = """
+            SELECT cm.role FROM "CompanyMember" cm
+            WHERE cm.user_id = $1
+            LIMIT 1
+        """
+        return query, (user_id,)
+        
     async def get_companies_by_user_id(self, conn: asyncpg.Connection, user_id: str) -> List[Dict[str, Any]]:
         query = """
             SELECT 
