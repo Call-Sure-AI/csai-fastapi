@@ -5,25 +5,25 @@ class ConversationQueries:
     """All SQL queries related to Conversation table"""
     
     GET_CONVERSATION_BY_ID = """
-        SELECT * FROM "Conversation" WHERE id = %s
+        SELECT * FROM "Conversation" WHERE id = $1
     """
     
     GET_CONVERSATIONS_BY_CUSTOMER = """
         SELECT * FROM "Conversation" 
-        WHERE "customer_id" = %s 
+        WHERE "customer_id" = $1 
         ORDER BY "created_at" DESC
     """
     
     GET_CONVERSATIONS_BY_COMPANY = """
         SELECT * FROM "Conversation" 
-        WHERE "company_id" = %s 
+        WHERE "company_id" = $1 
         ORDER BY "created_at" DESC
-        LIMIT %s OFFSET %s
+        LIMIT $2 OFFSET $3
     """
     
     GET_ACTIVE_CONVERSATIONS = """
         SELECT * FROM "Conversation" 
-        WHERE status = 'active' AND "company_id" = %s
+        WHERE status = 'active' AND "company_id" = $1
         ORDER BY "updated_at" DESC
     """
     
@@ -44,64 +44,64 @@ class ConversationQueries:
                ) as interactions
         FROM "Conversation" c
         LEFT JOIN "AgentInteraction" ai ON c.id = ai."conversation_id"
-        WHERE c.id = %s
+        WHERE c.id = $1
         GROUP BY c.id
     """
     
     CREATE_CONVERSATION = """
         INSERT INTO "Conversation" (id, "customer_id", "company_id", "current_agent_id", history) 
-        VALUES (%s, %s, %s, %s, %s) 
+        VALUES ($1, $2, $3, $4, $5) 
         RETURNING *
     """
     
     CREATE_CONVERSATION_BASIC = """
         INSERT INTO "Conversation" (id, "customer_id", "company_id") 
-        VALUES (%s, %s, %s) 
+        VALUES ($1, $2, $3) 
         RETURNING *
     """
     
     UPDATE_CONVERSATION_AGENT = """
         UPDATE "Conversation" 
-        SET "current_agent_id" = %s, "updated_at" = CURRENT_TIMESTAMP 
-        WHERE id = %s
+        SET "current_agent_id" = $1, "updated_at" = CURRENT_TIMESTAMP 
+        WHERE id = $2
         RETURNING *
     """
     
     UPDATE_CONVERSATION_HISTORY = """
         UPDATE "Conversation" 
-        SET history = %s, "messages_count" = %s, "updated_at" = CURRENT_TIMESTAMP 
-        WHERE id = %s
+        SET history = $1, "messages_count" = $2, "updated_at" = CURRENT_TIMESTAMP 
+        WHERE id = $3
         RETURNING *
     """
     
     UPDATE_CONVERSATION_STATUS = """
         UPDATE "Conversation" 
-        SET status = %s, "ended_at" = %s, "ended_by" = %s, "updated_at" = CURRENT_TIMESTAMP 
-        WHERE id = %s
+        SET status = $1, "ended_at" = $2, "ended_by" = $3, "updated_at" = CURRENT_TIMESTAMP 
+        WHERE id = $4
         RETURNING *
     """
     
     UPDATE_CONVERSATION_SENTIMENT = """
         UPDATE "Conversation" 
-        SET "sentiment_score" = %s, "updated_at" = CURRENT_TIMESTAMP 
-        WHERE id = %s
+        SET "sentiment_score" = $1, "updated_at" = CURRENT_TIMESTAMP 
+        WHERE id = $2
         RETURNING *
     """
     
     END_CONVERSATION = """
         UPDATE "Conversation" 
-        SET status = 'ended', "ended_at" = CURRENT_TIMESTAMP, "ended_by" = %s,
+        SET status = 'ended', "ended_at" = CURRENT_TIMESTAMP, "ended_by" = $1,
             duration = EXTRACT(EPOCH FROM (CURRENT_TIMESTAMP - "created_at")), "updated_at" = CURRENT_TIMESTAMP 
-        WHERE id = %s
+        WHERE id = $2
         RETURNING *
     """
     
     DELETE_CONVERSATION = """
-        DELETE FROM "Conversation" WHERE id = %s
+        DELETE FROM "Conversation" WHERE id = $1
     """
     
     DELETE_CONVERSATIONS_BY_COMPANY = """
-        DELETE FROM "Conversation" WHERE "company_id" = %s
+        DELETE FROM "Conversation" WHERE "company_id" = $1
     """
 
     @staticmethod

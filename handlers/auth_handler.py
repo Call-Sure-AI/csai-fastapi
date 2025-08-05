@@ -254,13 +254,15 @@ class AuthHandler:
             
             # Delete OTP
             query, params = OTPQueries.delete_otp_by_id_params(otp_record['id'])
-            await postgres_client.client.execute_update(query, params)
+            postgres_client.client.execute_update(query, params)
             
             # Check if user exists
             query, params = UserQueries.get_user_by_email_params(otp_request.email)
             user = await postgres_client.client.execute_query(query, params)
             user = user[0] if user else None
             new_user = False
+
+            print(f'User: {user}')
             
             if not user:
                 new_user = True
@@ -322,6 +324,10 @@ class AuthHandler:
                 value=user_data.model_dump_json(),
                 max_age=7 * 24 * 60 * 60
             )
+
+            # Delete OTP
+            query, params = OTPQueries.delete_otp_by_id_params(otp_record['id'])
+            await postgres_client.client.execute_update(query, params)
             
             return AuthResponse(
                 token=token,
