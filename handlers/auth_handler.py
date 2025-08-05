@@ -254,7 +254,7 @@ class AuthHandler:
             
             # Delete OTP
             query, params = OTPQueries.delete_otp_by_id_params(otp_record['id'])
-            postgres_client.client.execute_update(query, params)
+            await postgres_client.client.execute_update(query, params)
             
             # Check if user exists
             query, params = UserQueries.get_user_by_email_params(otp_request.email)
