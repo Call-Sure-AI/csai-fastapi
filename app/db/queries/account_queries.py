@@ -29,24 +29,14 @@ class AccountQueries:
     """
     
     CREATE_OAUTH_ACCOUNT = """
-<<<<<<< HEAD
         INSERT INTO "Account" ("userId", type, provider, "providerAccountId", "access_token", "createdAt", "updatedAt") 
         VALUES ($1, $2, $3, $4, $5, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP) 
-=======
-        INSERT INTO "Account" ("userId", type, provider, "providerAccountId", "access_token") 
-        VALUES ($1, $2, $3, $4, $5) 
->>>>>>> 96bee3d452de7d0f058473e83eb6eaeac9703abe
         RETURNING *
     """
     
     CREATE_CREDENTIALS_ACCOUNT = """
-<<<<<<< HEAD
         INSERT INTO "Account" ("userId", type, provider, "providerAccountId", "access_token", "createdAt", "updatedAt")
         VALUES ($1, $2, $3, $4, $5, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-=======
-        INSERT INTO "Account" ("userId", type, provider, "providerAccountId", "access_token")
-        VALUES ($1, $2, $3, $4, $5)
->>>>>>> 96bee3d452de7d0f058473e83eb6eaeac9703abe
         RETURNING *
     """
     
@@ -56,11 +46,8 @@ class AccountQueries:
             "access_token", "refresh_token", "expires_at", "token_type", scope, "id_token",
             "createdAt", "updatedAt"
         ) 
-<<<<<<< HEAD
+
         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP) 
-=======
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) 
->>>>>>> 96bee3d452de7d0f058473e83eb6eaeac9703abe
         RETURNING *
     """
     
