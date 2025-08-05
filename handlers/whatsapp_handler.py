@@ -12,8 +12,12 @@ from app.models.schemas import (
     WhatsAppTemplateMessage,
     WhatsAppMediaMessage,
     BulkMessageRequest,
-    BulkMessageResponse
+    BulkMessageResponse,
+    IntegrationType, 
+    IntegrationStatus
 )
+from datetime import datetime
+import json
 from config import Config
 from utils.whatsapp_onboarding_helper import WhatsAppOnboardingHelper
 
@@ -35,13 +39,12 @@ class WhatsAppHandler:
         if not self.fb_app_secret:
             raise ValueError("FACEBOOK_APP_SECRET is required but not found in environment variables")
         
-    async def onboard(self, db: AsyncSession, payload: WhatsAppOnboardRequest) -> Dict[str, Any]:
-        """Handle WhatsApp onboarding process"""
+    async def onboard(self, db: AsyncSession, payload: WhatsAppOnboardRequest, user_id: str = None, company_id: str = None) -> Dict[str, Any]:
         try:
             logger.info(f"Starting onboarding process for business_id: {payload.business_id}")
             
             if payload.status == "CANCEL":
-                await self.save_client(payload, db, access_token=None)
+                await self.save_client(payload, db, access_token=None, current_user_id=user_id, company_id=company_id)
                 logger.info(f"Onboarding cancelled for business_id: {payload.business_id}")
                 return {"message": "Signup cancelled and saved", "status": "cancelled"}
 
@@ -54,7 +57,6 @@ class WhatsAppHandler:
                         "action_required": "Please restart the WhatsApp onboarding process"
                     }
 
-                # Exchange code for token
                 try:
                     access_token = await self.exchange_code_for_token(payload.code)
                     if not access_token:
@@ -65,7 +67,7 @@ class WhatsAppHandler:
                             "action_required": "Please restart the WhatsApp onboarding process"
                         }
 
-                    await self.save_client(payload, db, access_token=access_token)
+                    await self.save_client(payload, db, access_token=access_token, current_user_id=user_id, company_id=company_id)
                     logger.info(f"Client onboarded successfully for business_id: {payload.business_id}")
                     return {"message": "Client onboarded successfully", "status": "completed"}
                     
@@ -76,13 +78,13 @@ class WhatsAppHandler:
                         error_type="expired_code"
                     )
             
-            # Handle unknown status
             logger.warning(f"Unknown status '{payload.status}' for business_id: {payload.business_id}")
             return {"error": f"Unknown status: {payload.status}"}
                 
         except Exception as e:
             logger.error(f"Onboarding failed for business_id: {payload.business_id}, error: {str(e)}")
             return {"error": f"Onboarding failed: {str(e)}"}
+
 
     async def exchange_code_for_token(self, code: str) -> Optional[str]:
         """Exchange authorization code for access token"""
@@ -143,10 +145,9 @@ class WhatsAppHandler:
             logger.error(f"Error exchanging code for token: {str(e)}")
             raise
 
-    async def save_client(self, payload: WhatsAppOnboardRequest, db: AsyncSession, access_token: Optional[str] = None) -> Optional[Any]:
-        """Save or update WhatsApp client in database"""
+    async def save_client(self, payload: WhatsAppOnboardRequest, db: AsyncSession, access_token: Optional[str] = None, current_user_id: str = None, company_id: str = None) -> Optional[Any]:
         try:
-            query = text("""
+            whatsapp_query = text("""
                 INSERT INTO whatsapp_clients (
                     business_id, waba_id, phone_number_id, access_token, 
                     status, current_step, created_at, updated_at
@@ -166,7 +167,7 @@ class WhatsAppHandler:
                 RETURNING id, business_id
             """)
             
-            result = await db.execute(query, {
+            whatsapp_result = await db.execute(whatsapp_query, {
                 "business_id": payload.business_id,
                 "waba_id": payload.waba_id,
                 "phone_number_id": payload.phone_number_id,
@@ -175,20 +176,76 @@ class WhatsAppHandler:
                 "current_step": payload.current_step,
             })
             
+            whatsapp_record = whatsapp_result.fetchone()
+            logger.info(f"Successfully saved/updated whatsapp_clients record for business_id: {payload.business_id}")
+
+            if current_user_id and company_id:
+                from app.models.schemas import IntegrationType, IntegrationStatus
+
+                integration_status = IntegrationStatus.ACTIVE if payload.status == "FINISH" else IntegrationStatus.PENDING
+                is_active = payload.status == "FINISH" and access_token is not None
+
+                config = {
+                    "business_id": payload.business_id,
+                    "waba_id": payload.waba_id,
+                    "phone_number_id": payload.phone_number_id,
+                    "access_token": access_token,
+                    "current_step": payload.current_step,
+                    "onboarding_status": payload.status
+                }
+                
+                integration_query = text("""
+                    INSERT INTO integrations (
+                        id, company_id, user_id, name, type, description, is_active, 
+                        status, config, webhook_url, expires_at, last_sync_at, tags,
+                        last_error, error_count, created_at, updated_at
+                    )
+                    VALUES (
+                        gen_random_uuid(), :company_id, :user_id, :name, :type, :description, 
+                        :is_active, :status, :config, :webhook_url, :expires_at, :last_sync_at,
+                        :tags, :last_error, :error_count, NOW(), NOW()
+                    )
+                    ON CONFLICT (company_id, type, (config->>'business_id')) 
+                    DO UPDATE SET 
+                        config = EXCLUDED.config,
+                        status = EXCLUDED.status,
+                        is_active = EXCLUDED.is_active,
+                        last_error = EXCLUDED.last_error,
+                        error_count = EXCLUDED.error_count,
+                        last_sync_at = EXCLUDED.last_sync_at,
+                        updated_at = NOW()
+                    RETURNING id, company_id, name, type
+                """)
+                
+                integration_result = await db.execute(integration_query, {
+                    "company_id": company_id,
+                    "user_id": current_user_id,
+                    "name": f"WhatsApp Business - {payload.business_id}",
+                    "type": IntegrationType.WHATSAPP.value,
+                    "description": f"WhatsApp integration for business {payload.business_id}",
+                    "is_active": is_active,
+                    "status": integration_status.value,
+                    "config": json.dumps(config),
+                    "webhook_url": None,
+                    "expires_at": None,
+                    "last_sync_at": datetime.utcnow().isoformat() if payload.status == "FINISH" else None,
+                    "tags": '[]',
+                    "last_error": None if payload.status == "FINISH" else "Onboarding not completed",
+                    "error_count": 0 if payload.status == "FINISH" else 1
+                })
+                
+                integration_record = integration_result.fetchone()
+                logger.info(f"Successfully saved/updated integrations record for business_id: {payload.business_id}")
+            
             await db.commit()
-            saved_record = result.fetchone()
-            
-            if saved_record:
-                logger.info(f"Successfully saved/updated client record for business_id: {payload.business_id}")
-            else:
-                logger.warning(f"No record returned after save for business_id: {payload.business_id}")
-            
-            return saved_record
+
+            return whatsapp_record
             
         except Exception as e:
             await db.rollback()
             logger.error(f"Error saving client data for business_id: {payload.business_id}, error: {str(e)}")
             raise
+
 
     async def send_message(self, db: AsyncSession, business_id: str, to: str, message: str) -> SendMessageResponse:
         """Send WhatsApp message"""

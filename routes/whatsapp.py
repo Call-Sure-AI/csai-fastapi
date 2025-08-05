@@ -33,22 +33,18 @@ onboarding_helper = WhatsAppOnboardingHelper()
 async def onboard_whatsapp(
     data: WhatsAppOnboardRequest,
     db: AsyncSession = Depends(get_db_connection),
-    current_user: UserResponse = Depends(get_current_user)  # Type hint fixed
+    current_user: UserResponse = Depends(get_current_user)
 ):
-    """
-    Onboard a WhatsApp Business Account
-    
-    - **business_id**: Unique identifier for the business
-    - **status**: Either "FINISH" or "CANCEL"
-    - **code**: Authorization code (required for FINISH status)
-    - **waba_id**: WhatsApp Business Account ID
-    - **phone_number_id**: WhatsApp Phone Number ID
-    - **current_step**: Current step in onboarding process
-    """
     try:
-        # Fixed: Access attribute directly instead of using .get()
         logger.info(f"Onboarding request from user {current_user.id} for business {data.business_id}")
-        result = await handler.onboard(db, data)
+
+        company_query = text("SELECT id FROM companies WHERE user_id = :user_id LIMIT 1")
+        company_result = await db.execute(company_query, {"user_id": current_user.id})
+        company_row = company_result.fetchone()
+        
+        company_id = company_row.id if company_row else None
+
+        result = await handler.onboard(db, data, current_user.id, company_id)
         
         if "error" in result:
             raise HTTPException(status_code=400, detail=result["error"])
