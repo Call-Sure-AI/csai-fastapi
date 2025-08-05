@@ -83,7 +83,7 @@ class AuthQueries:
             ) as accounts
         FROM "User" u
         LEFT JOIN "Account" a ON u.id = a."userId"
-        WHERE u.id = %s
+        WHERE u.id = $1
         GROUP BY u.id
     """
     
@@ -117,7 +117,7 @@ class AuthQueries:
         LEFT JOIN "Company" c ON u.id = c."user_id"
         LEFT JOIN "CompanyMember" cm ON u.id = cm."user_id"
         LEFT JOIN "Company" comp ON cm."company_id" = comp.id
-        WHERE u.id = %s
+        WHERE u.id = $1
         GROUP BY u.id
     """
 

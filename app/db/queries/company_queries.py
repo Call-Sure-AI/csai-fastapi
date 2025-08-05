@@ -267,3 +267,26 @@ class CompanyQueries:
         """
         row = await conn.fetchrow(query, api_key, company_id)
         return dict(row)
+
+    # Static methods for auth queries
+    COUNT_COMPANIES_BY_OWNER = """
+        SELECT COUNT(*) as count FROM "Company" WHERE user_id = $1
+    """
+    
+    GET_USER_FIRST_MEMBERSHIP = """
+        SELECT cm.role 
+        FROM "CompanyMember" cm 
+        WHERE cm.user_id = $1 
+        ORDER BY cm.created_at ASC 
+        LIMIT 1
+    """
+
+    @staticmethod
+    def count_companies_by_owner_params(user_id: str) -> tuple:
+        """Count companies owned by user"""
+        return CompanyQueries.COUNT_COMPANIES_BY_OWNER, (user_id,)
+    
+    @staticmethod
+    def get_user_first_membership_params(user_id: str) -> tuple:
+        """Get user's first company membership"""
+        return CompanyQueries.GET_USER_FIRST_MEMBERSHIP, (user_id,)
