@@ -6,7 +6,7 @@ from middleware.auth_middleware import get_current_user
 import logging
 
 logger = logging.getLogger(__name__)
-router = APIRouter(prefix="/companies", tags=["companies"])
+router = APIRouter(prefix="/api/company", tags=["company"])
 company_handler = CompanyHandler()
 
 @router.get("/user/{user_id}", response_model=List[Company])
