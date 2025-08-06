@@ -9,7 +9,7 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/company", tags=["companies"])
 company_handler = CompanyHandler()
 
-@router.get("/", response_model=Company)
+@router.get("", response_model=Company)
 async def get_company(
     current_user: UserResponse = Depends(get_current_user)
 ):

@@ -8,7 +8,7 @@ import logging
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/activity", tags=["activities"])
 
-@router.get("/", response_model=List[Dict[str, Any]])
+@router.get("", response_model=List[Dict[str, Any]])
 async def get_user_activity(
     current_user: UserResponse = Depends(get_current_user),
     limit: Optional[int] = Query(50, description="Number of activities to return"),
