@@ -303,6 +303,19 @@ class Company(CompanyBase):
     class Config:
         from_attributes = True
 
+class Activity(BaseModel):
+    id: str
+    user_id: str
+    action: str
+    entity_type: str
+    entity_id: str
+    metadata: Optional[Dict[str, Any]] = {}
+    created_at: datetime
+    user: Optional[Dict[str, str]] = None  # For user name and email
+    
+    class Config:
+        from_attributes = True
+
 class EmailRequest(BaseModel):
     to: EmailStr
     subject: str

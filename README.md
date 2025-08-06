@@ -42,6 +42,13 @@ Start the development server:
 uvicorn app.main:app --reload
 ```
 
+To see the files structure etc:
+find . -type f \
+  -not -path "./.venv/*" \
+  -not -path "*/__pycache__/*" \
+  -not -path "./.git/*"
+
+
 The API will be available at:
 - Main app: http://localhost:8000
 
