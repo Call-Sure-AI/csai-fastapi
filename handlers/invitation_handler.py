@@ -55,7 +55,7 @@ class InvitationHandler:
                         conn, invitation_data.dict(), token, expires_at
                     )
                 
-                invitation_url = f"https://beta.callsure.ai/invite?token={token}"
+                invitation_url = f"https://www.callsure.ai//invite?token={token}"
                 
                 return {
                     "message": "Invitation created successfully",
@@ -272,7 +272,7 @@ class InvitationHandler:
                         "expires_at": inv['expires_at'].isoformat() if isinstance(inv['expires_at'], datetime) else str(inv['expires_at']),
                         "created_at": inv['created_at'].isoformat() if isinstance(inv['created_at'], datetime) else str(inv['created_at']),
                         "accepted_at": inv.get('accepted_at').isoformat() if isinstance(inv.get('accepted_at'), datetime) else inv.get('accepted_at'),
-                        "invitation_url": f"https://beta.callsure.ai/invite?token={inv['token']}"
+                        "invitation_url": f"https://www.callsure.ai//invite?token={inv['token']}"
                     }
                     for inv in invitations
                 ]
@@ -405,7 +405,7 @@ class InvitationHandler:
                 if company['user_id'] != user_id:
                     raise PermissionError("Not authorized to send emails for this invitation")
                 
-                invitation_url = f"https://beta.callsure.ai/invite?token={invitation['token']}"
+                invitation_url = f"https://www.callsure.ai//invite?token={invitation['token']}"
                 
                 logger.info(f"Sending invitation to {invitation['email']} for company {company['name']}")
                 logger.info(f"Invitation URL: {invitation_url}")
