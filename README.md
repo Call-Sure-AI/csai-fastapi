@@ -19,7 +19,7 @@ cd csai-fastapi
 2. Create and activate virtual environment
 ```bash
 python -m venv venv
-venv\Scripts\activate  # Windows
+.venv\Scripts\activate.bat  # Windows
 # or
 source venv/bin/activate  # Linux/Mac
 ```
@@ -41,6 +41,13 @@ Start the development server:
 ```bash
 uvicorn app.main:app --reload
 ```
+
+To see the files structure etc:
+find . -type f \
+  -not -path "./.venv/*" \
+  -not -path "*/__pycache__/*" \
+  -not -path "./.git/*"
+
 
 The API will be available at:
 - Main app: http://localhost:8000

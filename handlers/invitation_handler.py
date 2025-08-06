@@ -50,11 +50,12 @@ class InvitationHandler:
                         expires_at
                     )
                 else:
+                    # Convert Pydantic model to dict
                     invitation = await self.invitation_queries.create_invitation(
-                        conn, invitation_data, token, expires_at
+                        conn, invitation_data.dict(), token, expires_at
                     )
                 
-                invitation_url = f"{os.getenv('FRONTEND_URL', 'http://localhost:3000')}/invite?token={token}"
+                invitation_url = f"https://www.callsure.ai/invite?token={token}"
                 
                 return {
                     "message": "Invitation created successfully",
@@ -62,14 +63,14 @@ class InvitationHandler:
                     "invitation": {
                         "id": invitation['id'],
                         "email": invitation['email'],
-                        "expires_at": invitation['expires_at']
+                        "expires_at": invitation['expires_at'].isoformat() if isinstance(invitation['expires_at'], datetime) else str(invitation['expires_at'])
                     }
                 }
                 
         except (ValueError, PermissionError):
             raise
         except Exception as error:
-            logger.error(f"Generate invitation error: {error}")
+            logger.error(f"Generate invitation error: {error}", exc_info=True)
             raise Exception("Internal server error")
 
     async def validate_invitation(self, token: str) -> Dict[str, Any]:
@@ -111,7 +112,7 @@ class InvitationHandler:
                             "business_name": company['business_name']
                         },
                         "role": invitation['role'],
-                        "expires_at": invitation['expires_at']
+                        "expires_at": invitation['expires_at'].isoformat() if isinstance(invitation['expires_at'], datetime) else str(invitation['expires_at'])
                     }
                 }
                 
@@ -145,6 +146,17 @@ class InvitationHandler:
                 if invitation['status'] == 'accepted':
                     raise ValueError("Invitation has already been accepted")
                 
+                # Parse company data if it's a JSON string
+                company_data = invitation['company']
+                if isinstance(company_data, str):
+                    try:
+                        company = json.loads(company_data)
+                    except json.JSONDecodeError:
+                        logger.error(f"Failed to parse company JSON: {company_data}")
+                        raise ValueError("Invalid company data")
+                else:
+                    company = company_data
+                
                 user = await self.invitation_queries.get_user_by_email(conn, invitation['email'])
                 
                 async with conn.transaction():
@@ -163,28 +175,47 @@ class InvitationHandler:
                             acceptance_data.name or invitation['email'].split('@')[0],
                             hashed_password
                         )
-
-                    await self.invitation_queries.create_company_membership(
-                        conn, user['id'], invitation['company']['id'], invitation['role']
+                    
+                    # Check for existing membership
+                    existing_membership_query = """
+                        SELECT id FROM "CompanyMember" 
+                        WHERE user_id = $1 AND company_id = $2
+                    """
+                    existing_membership = await conn.fetchrow(
+                        existing_membership_query, 
+                        user['id'], 
+                        company['id']  # Use parsed company object
                     )
-
+                    
+                    if existing_membership:
+                        logger.info(f"User {user['id']} is already a member of company {company['id']}")
+                    else:
+                        # Create new membership
+                        await self.invitation_queries.create_company_membership(
+                            conn, user['id'], company['id'], invitation['role']
+                        )
+                    
+                    # Log activity
                     try:
                         await self.activity_logger.log({
                             'user_id': user['id'],
-                            'action': 'joined_company',
+                            'action': 'joined_company' if not existing_membership else 'accepted_invitation',
                             'entity_type': 'company',
-                            'entity_id': invitation['company']['id'],
+                            'entity_id': company['id'],
                             'metadata': {
                                 'role': invitation['role'],
                                 'invitation_id': invitation['id'],
-                                'company_name': invitation['company']['name']
+                                'company_name': company['name'],
+                                'already_member': bool(existing_membership)
                             }
                         })
                     except Exception as log_error:
                         logger.error(f'Failed to log activity: {log_error}')
-
+                    
+                    # Mark invitation as accepted
                     await self.invitation_queries.accept_invitation(conn, invitation['id'])
-
+                
+                # Generate JWT token
                 jwt_payload = {
                     'id': user['id'],
                     'email': user['email'],
@@ -198,7 +229,7 @@ class InvitationHandler:
                 )
                 
                 return {
-                    "message": "Invitation accepted successfully",
+                    "message": "Invitation accepted successfully" if not existing_membership else "You were already a member of this company",
                     "token": jwt_token,
                     "user": {
                         "id": user['id'],
@@ -206,7 +237,8 @@ class InvitationHandler:
                         "name": user['name'],
                         "image": user.get('image')
                     },
-                    "company": invitation['company']
+                    "company": company,  # Return parsed company object
+                    "already_member": bool(existing_membership)
                 }
                 
         except ValueError:
@@ -237,10 +269,10 @@ class InvitationHandler:
                         "email": inv['email'],
                         "role": inv['role'],
                         "status": inv['status'],
-                        "expires_at": inv['expires_at'],
-                        "created_at": inv['created_at'],
-                        "accepted_at": inv.get('accepted_at'),
-                        "invitation_url": f"{os.getenv('FRONTEND_URL', 'http://localhost:3000')}/invite?token={inv['token']}"
+                        "expires_at": inv['expires_at'].isoformat() if isinstance(inv['expires_at'], datetime) else str(inv['expires_at']),
+                        "created_at": inv['created_at'].isoformat() if isinstance(inv['created_at'], datetime) else str(inv['created_at']),
+                        "accepted_at": inv.get('accepted_at').isoformat() if isinstance(inv.get('accepted_at'), datetime) else inv.get('accepted_at'),
+                        "invitation_url": f"https://www.callsure.ai/invite?token={inv['token']}"
                     }
                     for inv in invitations
                 ]
@@ -274,8 +306,8 @@ class InvitationHandler:
                         "id": inv['id'],
                         "email": inv['email'],
                         "role": inv['role'],
-                        "accepted_at": inv['accepted_at'],
-                        "created_at": inv['created_at']
+                        "accepted_at": inv['accepted_at'].isoformat() if isinstance(inv['accepted_at'], datetime) else str(inv['accepted_at']),
+                        "created_at": inv['created_at'].isoformat() if isinstance(inv['created_at'], datetime) else str(inv['created_at'])
                     }
                     for inv in invitations
                 ]
@@ -307,8 +339,8 @@ class InvitationHandler:
                         "id": inv['id'],
                         "email": inv['email'],
                         "role": inv['role'],
-                        "expires_at": inv['expires_at'],
-                        "created_at": inv['created_at']
+                        "expires_at": inv['expires_at'].isoformat() if isinstance(inv['expires_at'], datetime) else str(inv['expires_at']),
+                        "created_at": inv['created_at'].isoformat() if isinstance(inv['created_at'], datetime) else str(inv['created_at'])
                     }
                     for inv in invitations
                 ]
@@ -332,7 +364,14 @@ class InvitationHandler:
                 if not invitation:
                     raise ValueError("Invitation not found")
                 
-                if invitation['company']['user_id'] != user_id:
+                # Parse company data if it's JSON string
+                company_data = invitation['company']
+                if isinstance(company_data, str):
+                    company = json.loads(company_data)
+                else:
+                    company = company_data
+                
+                if company['user_id'] != user_id:
                     raise PermissionError("Not authorized to delete this invitation")
                 
                 await self.invitation_queries.delete_invitation(conn, invitation_id)
@@ -356,12 +395,19 @@ class InvitationHandler:
                 if not invitation:
                     raise ValueError("Invitation not found")
                 
-                if invitation['company']['user_id'] != user_id:
+                # Parse company data if it's JSON string
+                company_data = invitation['company']
+                if isinstance(company_data, str):
+                    company = json.loads(company_data)
+                else:
+                    company = company_data
+                
+                if company['user_id'] != user_id:
                     raise PermissionError("Not authorized to send emails for this invitation")
                 
-                invitation_url = f"{os.getenv('FRONTEND_URL', 'http://localhost:3000')}/invite?token={invitation['token']}"
+                invitation_url = f"https://www.callsure.ai/invite?token={invitation['token']}"
                 
-                logger.info(f"Sending invitation to {invitation['email']} for company {invitation['company']['name']}")
+                logger.info(f"Sending invitation to {invitation['email']} for company {company['name']}")
                 logger.info(f"Invitation URL: {invitation_url}")
                 
                 # Create email HTML
@@ -372,9 +418,9 @@ class InvitationHandler:
                     </div>
                     
                     <div style="padding: 30px; background: #f9f9f9; border-radius: 0 0 10px 10px;">
-                        <h1 style="color: #162a47; margin-bottom: 20px;">You've been invited to join {invitation['company']['name']}</h1>
+                        <h1 style="color: #162a47; margin-bottom: 20px;">You've been invited to join {company['name']}</h1>
                         <p style="color: #666; font-size: 16px; line-height: 1.5;">
-                            You've been invited to join {invitation['company']['business_name']} as a {invitation['role']}.
+                            You've been invited to join {company['business_name']} as a {invitation['role']}.
                         </p>
                         <p style="color: #666; font-size: 16px; line-height: 1.5;">
                             Click the link below to accept the invitation:
@@ -396,7 +442,7 @@ class InvitationHandler:
                 # Send email
                 email_request = EmailRequest(
                     to=invitation['email'],
-                    subject=f"You've been invited to join {invitation['company']['name']}",
+                    subject=f"You've been invited to join {company['name']}",
                     html=html_content
                 )
                 

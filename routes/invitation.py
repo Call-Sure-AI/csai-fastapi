@@ -1,6 +1,6 @@
 from fastapi import APIRouter, HTTPException, Depends, Path, Body
-from typing import Dict, Any
-from app.models.schemas import InvitationCreate, InvitationAccept, Invitation, UserResponse
+from typing import Dict, Any, Optional
+from app.models.schemas import InvitationCreate, InvitationAccept, Invitation, UserResponse, SendInvitationEmailRequest
 from handlers.invitation_handler import InvitationHandler
 from middleware.auth_middleware import get_current_user
 import logging
@@ -133,14 +133,38 @@ async def delete_invitation(
         logger.error(f"Error in delete_invitation: {e}")
         raise HTTPException(status_code=500, detail="Internal server error")
 
+# ADD this new endpoint as a workaround
+@router.post("/{invitation_id}/delete")
+async def delete_invitation_via_post(
+    invitation_id: str = Path(..., description="Invitation ID"),
+    current_user: UserResponse = Depends(get_current_user)
+):
+    """Alternative endpoint to delete invitation using POST (workaround for CORS issues)"""
+    try:
+        user_id = current_user.id
+        result = await invitation_handler.delete_invitation(invitation_id, user_id)
+        return result
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except PermissionError as e:
+        raise HTTPException(status_code=403, detail=str(e))
+    except Exception as e:
+        logger.error(f"Error in delete_invitation_via_post: {e}")
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+@router.options("/{invitation_id}")
+async def options_invitation(invitation_id: str):
+    """Handle OPTIONS request for CORS preflight"""
+    return {"message": "OK"}
+
 @router.post("/send-email")
 async def send_invitation_email(
-    invitation_id: str = Body(..., embed=True),
+    request: SendInvitationEmailRequest,
     current_user: UserResponse = Depends(get_current_user)
 ):
     try:
         user_id = current_user.id
-        result = await invitation_handler.send_invitation_email(invitation_id, user_id)
+        result = await invitation_handler.send_invitation_email(request.invitation_id, user_id)
         return result
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
