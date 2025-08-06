@@ -1,5 +1,5 @@
 from fastapi import APIRouter, HTTPException, Depends, Path, Body
-from typing import Dict, Any
+from typing import Dict, Any, Optional
 from app.models.schemas import InvitationCreate, InvitationAccept, Invitation, UserResponse, SendInvitationEmailRequest
 from handlers.invitation_handler import InvitationHandler
 from middleware.auth_middleware import get_current_user
@@ -130,8 +130,32 @@ async def delete_invitation(
     except PermissionError as e:
         raise HTTPException(status_code=403, detail=str(e))
     except Exception as e:
-        logger.error(f"Error in delete_invitation: {e}")
+        logger.error(f"Error in delete_invitation: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail="Internal server error")
+
+# Add a POST alternative as a workaround
+@router.post("/{invitation_id}/delete")
+async def delete_invitation_post(
+    invitation_id: str = Path(..., description="Invitation ID"),
+    current_user: UserResponse = Depends(get_current_user)
+):
+    """Alternative DELETE endpoint using POST method"""
+    try:
+        user_id = current_user.id
+        result = await invitation_handler.delete_invitation(invitation_id, user_id)
+        return result
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except PermissionError as e:
+        raise HTTPException(status_code=403, detail=str(e))
+    except Exception as e:
+        logger.error(f"Error in delete_invitation_post: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+@router.options("/{invitation_id}")
+async def options_invitation(invitation_id: str):
+    """Handle OPTIONS request for CORS preflight"""
+    return {"message": "OK"}
 
 @router.post("/send-email")
 async def send_invitation_email(
