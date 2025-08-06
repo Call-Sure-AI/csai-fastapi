@@ -8,7 +8,7 @@ import logging
 logger = logging.getLogger(__name__)
 
 # Create router with correct prefix
-router = APIRouter(prefix="/agents", tags=["agents"])
+router = APIRouter(prefix="/agent", tags=["agents"])
 
 # Create a dependency to get agent handler
 def get_agent_handler():

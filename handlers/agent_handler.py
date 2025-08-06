@@ -223,12 +223,14 @@ class AgentHandler:
                     'company_id': result['company_id']
                 }
                 # Don't await this - let it run in background
-                asyncio.create_task(
-                    self.db.execute_insert(
+                try:
+                    await self.db.execute_insert(
                         activity_query,
                         (user_id, 'CREATE', 'AGENT', result['id'], json.dumps(activity_metadata))
                     )
-                )
+                    logger.info(f"Activity logged for agent creation: {result['id']}")
+                except Exception as log_error:
+                    logger.warning(f'Failed to log agent creation activity: {log_error}')
             except Exception as log_error:
                 # Don't fail if activities table doesn't exist
                 logger.warning(f'Failed to log agent creation activity: {log_error}')
