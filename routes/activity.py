@@ -17,6 +17,8 @@ async def get_user_activity(
 ):
     """Get activity log for current user"""
     try:
+        logger.info(f"Getting activities for user: {current_user.id}")  # Add this
+        
         activities = await ActivityLogger.get_user_activity(
             user_id=current_user.id,
             limit=limit,
@@ -24,7 +26,8 @@ async def get_user_activity(
             entity_type=entity_type
         )
         
+        logger.info(f"Returning {len(activities)} activities")  # Add this
         return activities
     except Exception as e:
-        logger.error(f"Error fetching user activity: {e}")
+        logger.error(f"Error fetching user activity: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail="Internal server error")

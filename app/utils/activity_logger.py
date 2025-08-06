@@ -36,10 +36,67 @@ class ActivityLogger:
         try:
             connection = await get_db_connection()
             async with connection as conn:
-                activity_queries = ActivityQueries()
-                return await activity_queries.get_user_activities(
-                    conn, user_id, limit, offset, entity_type
-                )
+                # Note: No quotes around activities table name
+                query = """
+                    SELECT 
+                        a.id,
+                        a.user_id,
+                        a.action,
+                        a.entity_type,
+                        a.entity_id,
+                        a.metadata,
+                        a.created_at,
+                        u.name as user_name,
+                        u.email as user_email
+                    FROM activities a
+                    LEFT JOIN "User" u ON a.user_id = u.id
+                    WHERE a.user_id = $1
+                """
+                
+                params = [user_id]
+                
+                if entity_type:
+                    query += " AND a.entity_type = $2"
+                    params.append(entity_type)
+                
+                query += " ORDER BY a.created_at DESC"
+                
+                if entity_type:
+                    query += " LIMIT $3 OFFSET $4"
+                    params.extend([limit, offset])
+                else:
+                    query += " LIMIT $2 OFFSET $3"
+                    params.extend([limit, offset])
+                
+                rows = await conn.fetch(query, *params)
+                
+                activities = []
+                for row in rows:
+                    activity = dict(row)
+                    
+                    # Parse metadata if it's JSON
+                    if activity.get('metadata'):
+                        if isinstance(activity['metadata'], str):
+                            try:
+                                activity['metadata'] = json.loads(activity['metadata'])
+                            except json.JSONDecodeError:
+                                activity['metadata'] = {}
+                    
+                    # Format user info
+                    activity['user'] = {
+                        'name': activity.pop('user_name', None),
+                        'email': activity.pop('user_email', None)
+                    }
+                    
+                    # Convert datetime to ISO format
+                    if activity.get('created_at'):
+                        activity['created_at'] = activity['created_at'].isoformat()
+                    
+                    activities.append(activity)
+                
+                logger.info(f"Found {len(activities)} activities for user {user_id}")
+                return activities
+                
         except Exception as e:
-            logger.error(f"Failed to get user activity: {e}")
+            logger.error(f"Failed to get user activity: {e}", exc_info=True)
             return []

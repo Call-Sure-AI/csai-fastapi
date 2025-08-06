@@ -65,7 +65,7 @@ class ActivityQueries:
                 a.created_at,
                 u.name as user_name,
                 u.email as user_email
-            FROM activities a
+            FROM activities a  -- No quotes around activities
             LEFT JOIN "User" u ON a.user_id = u.id
             WHERE a.user_id = $1
         """
