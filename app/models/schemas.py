@@ -359,18 +359,22 @@ class VerificationEmailRequest(BaseModel):
 
 class InvitationRole(str, Enum):
     ADMIN = "admin"
+    MANAGER = "manager"  # Changed from VIEWER
     MEMBER = "member"
-    VIEWER = "viewer"
 
 class InvitationStatus(str, Enum):
     PENDING = "pending"
     ACCEPTED = "accepted"
     EXPIRED = "expired"
+    CANCELLED = "cancelled"  # Optional, if you use it
 
 class InvitationCreate(BaseModel):
     email: EmailStr
-    company_id: str = Field(..., description="Company ID")
+    company_id: str = Field(..., description="Company ID", validation_alias="companyId")
     role: Optional[InvitationRole] = Field(InvitationRole.MEMBER, description="User role")
+    
+    class Config:
+        populate_by_name = True  # Accept both company_id and companyId
 
 class InvitationAccept(BaseModel):
     name: Optional[str] = Field(None, description="User name (required for new users)")
