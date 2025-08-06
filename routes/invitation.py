@@ -130,16 +130,16 @@ async def delete_invitation(
     except PermissionError as e:
         raise HTTPException(status_code=403, detail=str(e))
     except Exception as e:
-        logger.error(f"Error in delete_invitation: {e}", exc_info=True)
+        logger.error(f"Error in delete_invitation: {e}")
         raise HTTPException(status_code=500, detail="Internal server error")
 
-# Add a POST alternative as a workaround
+# ADD this new endpoint as a workaround
 @router.post("/{invitation_id}/delete")
-async def delete_invitation_post(
+async def delete_invitation_via_post(
     invitation_id: str = Path(..., description="Invitation ID"),
     current_user: UserResponse = Depends(get_current_user)
 ):
-    """Alternative DELETE endpoint using POST method"""
+    """Alternative endpoint to delete invitation using POST (workaround for CORS issues)"""
     try:
         user_id = current_user.id
         result = await invitation_handler.delete_invitation(invitation_id, user_id)
@@ -149,7 +149,7 @@ async def delete_invitation_post(
     except PermissionError as e:
         raise HTTPException(status_code=403, detail=str(e))
     except Exception as e:
-        logger.error(f"Error in delete_invitation_post: {e}", exc_info=True)
+        logger.error(f"Error in delete_invitation_via_post: {e}")
         raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.options("/{invitation_id}")
