@@ -1,6 +1,6 @@
 from fastapi import APIRouter, HTTPException, Depends, Path, Body
 from typing import Dict, Any
-from app.models.schemas import InvitationCreate, InvitationAccept, Invitation, UserResponse
+from app.models.schemas import InvitationCreate, InvitationAccept, Invitation, UserResponse, SendInvitationEmailRequest
 from handlers.invitation_handler import InvitationHandler
 from middleware.auth_middleware import get_current_user
 import logging
@@ -135,12 +135,12 @@ async def delete_invitation(
 
 @router.post("/send-email")
 async def send_invitation_email(
-    invitation_id: str = Body(..., embed=True),
+    request: SendInvitationEmailRequest,
     current_user: UserResponse = Depends(get_current_user)
 ):
     try:
         user_id = current_user.id
-        result = await invitation_handler.send_invitation_email(invitation_id, user_id)
+        result = await invitation_handler.send_invitation_email(request.invitation_id, user_id)
         return result
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))

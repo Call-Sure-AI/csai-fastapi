@@ -403,6 +403,18 @@ class InvitationResponse(BaseModel):
 class InvitationValidation(BaseModel):
     invitation: dict
 
+class SendInvitationEmailRequest(BaseModel):
+    invitation_id: str = Field(..., validation_alias="invitationId")
+    
+    class Config:
+        populate_by_name = True
+
+class DeleteInvitationRequest(BaseModel):
+    invitation_id: str = Field(..., validation_alias="invitationId")
+    
+    class Config:
+        populate_by_name = True
+
 class S3FileUploadResponse(BaseModel):
     success: bool
     key: Optional[str] = None
