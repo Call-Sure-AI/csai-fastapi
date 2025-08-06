@@ -7,6 +7,8 @@ from .email import router as email_router
 from .s3 import router as s3_router
 from .invitation import router as invitation_router
 from .whatsapp import router as whatsapp_router
+from .activity import router as activity_router
+
 # Create the main API router
 api_router = APIRouter()
 
@@ -20,6 +22,8 @@ api_router.include_router(email_router, tags=["Email"])
 api_router.include_router(invitation_router, tags=["Invitations"])
 api_router.include_router(s3_router, tags=["File Storage"])
 api_router.include_router(whatsapp_router, tags=["WhatsApp"])
+api_router.include_router(activity_router, tags=["Activities"])
+
 # You can also create versioned API routers
 v1_router = APIRouter()
 v1_router.include_router(auth_router, tags=["Authentication"])
@@ -30,5 +34,6 @@ v1_router.include_router(email_router, tags=["Email"])
 v1_router.include_router(invitation_router, tags=["Invitations"])
 v1_router.include_router(s3_router, tags=["File Storage"])
 v1_router.include_router(whatsapp_router, tags=["WhatsApp"])
+v1_router.include_router(activity_router, tags=["Activities"])
 # Export both for flexibility
 __all__ = ["api_router", "v1_router"]

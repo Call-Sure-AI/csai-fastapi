@@ -9,6 +9,21 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/company", tags=["companies"])
 company_handler = CompanyHandler()
 
+@router.get("/", response_model=Company)
+async def get_company(
+    current_user: UserResponse = Depends(get_current_user)
+):
+    """Get company for current user - equivalent to Node's getById"""
+    try:
+        user_id = current_user.id
+        company = await company_handler.get_company_by_user(user_id)
+        return company
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        logger.error(f"Error in get_company: {e}")
+        raise HTTPException(status_code=500, detail="Internal server error")
+
 @router.get("/user/{user_id}", response_model=List[Company])
 async def get_all_companies_for_user(
     user_id: str = Path(..., description="User ID to get companies for"),
