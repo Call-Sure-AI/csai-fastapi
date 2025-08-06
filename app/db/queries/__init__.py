@@ -16,6 +16,7 @@ from .conversation_queries import ConversationQueries
 from .document_queries import DocumentQueries
 from .session_queries import SessionQueries
 from .invitation_queries import InvitationQueries
+from .activity_queries import ActivityQueries  # ADD THIS
 
 __all__ = [
     'UserQueries',
@@ -27,5 +28,6 @@ __all__ = [
     'ConversationQueries',
     'DocumentQueries',
     'SessionQueries',
-    'InvitationQueries'
+    'InvitationQueries',
+    'ActivityQueries'  # ADD THIS
 ]

@@ -6,8 +6,23 @@ from middleware.auth_middleware import get_current_user
 import logging
 
 logger = logging.getLogger(__name__)
-router = APIRouter(prefix="/companies", tags=["companies"])
+router = APIRouter(prefix="/company", tags=["companies"])
 company_handler = CompanyHandler()
+
+@router.get("", response_model=Company)
+async def get_company(
+    current_user: UserResponse = Depends(get_current_user)
+):
+    """Get company for current user - equivalent to Node's getById"""
+    try:
+        user_id = current_user.id
+        company = await company_handler.get_company_by_user(user_id)
+        return company
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        logger.error(f"Error in get_company: {e}")
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.get("/user/{user_id}", response_model=List[Company])
 async def get_all_companies_for_user(
@@ -74,17 +89,22 @@ async def create_company(
 @router.post("/create-or-update", response_model=Company)
 async def create_or_update_company(
     company_data: CompanyCreate = Body(...),
-    current_user: UserResponse = Depends(get_current_user),
-    company_handler: CompanyHandler = Depends(CompanyHandler)
+    current_user: UserResponse = Depends(get_current_user)
 ):
     try:
+        logger.info(f"Received create-or-update request for user: {current_user.id}")
+        logger.info(f"Company data: {company_data.dict()}")
+        
         user_id = current_user.id
         company = await company_handler.create_or_update_company(company_data, user_id)
+        
+        logger.info(f"Successfully created/updated company: {company.get('id')}")
         return company
     except ValueError as e:
+        logger.error(f"ValueError in create_or_update_company: {e}")
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
-        logger.error(f"Error in create_or_update_company: {e}")
+        logger.error(f"Error in create_or_update_company: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.put("/{company_id}", response_model=Company)

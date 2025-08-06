@@ -98,6 +98,8 @@ if IS_PRODUCTION:
         "http://localhost:3000",
         "https://callsure.ai",
         "https://*.callsure.ai",
+        "https://www.callsure.ai",  # Add this
+        "https://beta.callsure.ai",
     ]
 
 app.add_middleware(
@@ -112,15 +114,7 @@ app.add_middleware(
 app.add_middleware(GZipMiddleware, minimum_size=1000)
 
 # Include all routers
-app.include_router(health_check_router)
-app.include_router(auth_router)
-app.include_router(agent_router)
-app.include_router(company_router)
-#app.include_router(customer_router)
-app.include_router(email_router)
-app.include_router(invitation_router)
-app.include_router(s3_router)
-app.include_router(whatsapp_router)  # This will now work!
+app.include_router(api_router, prefix="/api")
 
 # Add trusted host middleware for security in production
 if IS_PRODUCTION:
@@ -163,9 +157,6 @@ async def global_exception_handler(request: Request, exc: Exception):
             "path": str(request.url.path),
         }
     )
-
-# Include API routes
-app.include_router(api_router, prefix="/api")
 
 # Root endpoint
 @app.get("/", tags=["Root"])

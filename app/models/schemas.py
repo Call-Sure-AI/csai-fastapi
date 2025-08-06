@@ -268,13 +268,21 @@ class CompanyBase(BaseModel):
                 raise ValueError('Invalid phone number format')
         return v
     
-    def to_db_dict(self) -> Dict[str, Any]:
-        data = self.model_dump()
-
-        if data.get('website'):
+    def model_dump(self, **kwargs) -> Dict[str, Any]:
+        """Override model_dump to convert HttpUrl to string"""
+        data = super().model_dump(**kwargs)
+        
+        # Convert HttpUrl fields to strings
+        if 'website' in data and data['website']:
             data['website'] = str(data['website'])
+        if 'logo' in data and data['logo']:
+            data['logo'] = str(data['logo'])
             
         return data
+    
+    def to_db_dict(self) -> Dict[str, Any]:
+        """This method is now redundant but kept for backward compatibility"""
+        return self.model_dump()
 
 class CompanyCreate(CompanyBase):
     pass
@@ -291,6 +299,19 @@ class Company(CompanyBase):
     api_key: str
     created_at: datetime
     updated_at: datetime
+    
+    class Config:
+        from_attributes = True
+
+class Activity(BaseModel):
+    id: str
+    user_id: str
+    action: str
+    entity_type: str
+    entity_id: str
+    metadata: Optional[Dict[str, Any]] = {}
+    created_at: datetime
+    user: Optional[Dict[str, str]] = None  # For user name and email
     
     class Config:
         from_attributes = True
@@ -338,18 +359,22 @@ class VerificationEmailRequest(BaseModel):
 
 class InvitationRole(str, Enum):
     ADMIN = "admin"
+    MANAGER = "manager"  # Changed from VIEWER
     MEMBER = "member"
-    VIEWER = "viewer"
 
 class InvitationStatus(str, Enum):
     PENDING = "pending"
     ACCEPTED = "accepted"
     EXPIRED = "expired"
+    CANCELLED = "cancelled"  # Optional, if you use it
 
 class InvitationCreate(BaseModel):
     email: EmailStr
-    company_id: str = Field(..., description="Company ID")
+    company_id: str = Field(..., description="Company ID", validation_alias="companyId")
     role: Optional[InvitationRole] = Field(InvitationRole.MEMBER, description="User role")
+    
+    class Config:
+        populate_by_name = True  # Accept both company_id and companyId
 
 class InvitationAccept(BaseModel):
     name: Optional[str] = Field(None, description="User name (required for new users)")
@@ -377,6 +402,18 @@ class InvitationResponse(BaseModel):
 
 class InvitationValidation(BaseModel):
     invitation: dict
+
+class SendInvitationEmailRequest(BaseModel):
+    invitation_id: str = Field(..., validation_alias="invitationId")
+    
+    class Config:
+        populate_by_name = True
+
+class DeleteInvitationRequest(BaseModel):
+    invitation_id: str = Field(..., validation_alias="invitationId")
+    
+    class Config:
+        populate_by_name = True
 
 class S3FileUploadResponse(BaseModel):
     success: bool
