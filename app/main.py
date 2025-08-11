@@ -8,6 +8,7 @@ from routes.company import router as company_router
 from routes.email import router as email_router
 from routes.invitation import router as invitation_router
 from routes.s3 import router as s3_router
+from routes.ticket import router as ticket_router
 from routes.whatsapp import router as whatsapp_router  # ADD THIS LINE!
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.trustedhost import TrustedHostMiddleware

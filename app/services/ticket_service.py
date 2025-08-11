@@ -157,3 +157,99 @@ class AutoTicketService:
         note_query = 'INSERT INTO "TicketNote" (id, ticket_id, content, author, is_internal, created_at) VALUES ($1, $2, $3, $4, $5, NOW())'
         await self.db.execute(note_query, str(uuid.uuid4()), ticket_id, content, author, is_internal)
         return True
+
+    async def close_ticket(
+        self, 
+        ticket_id: str, 
+        company_id: str, 
+        closed_by: str,
+        reason: Optional[str] = None,
+        resolution_notes: Optional[str] = None,
+        auto_resolved: bool = False
+    ) -> bool:
+
+        try:
+            ticket_check_query = '''
+                SELECT id, status FROM "Ticket" 
+                WHERE id = $1 AND company_id = $2
+            '''
+            ticket = await self.db.fetchrow(ticket_check_query, ticket_id, company_id)
+            
+            if not ticket:
+                logger.warning(f"Ticket {ticket_id} not found for company {company_id}")
+                return False
+
+            if ticket['status'] == TicketStatus.CLOSED:
+                logger.info(f"Ticket {ticket_id} is already closed")
+                return False
+
+            close_timestamp = datetime.utcnow()
+            update_query = '''
+                UPDATE "Ticket" 
+                SET 
+                    status = $1,
+                    closed_at = $2,
+                    updated_at = $3,
+                    auto_resolved = $4,
+                    resolution_notes = COALESCE($5, resolution_notes)
+                WHERE id = $6 AND company_id = $7
+            '''
+            
+            await self.db.execute(
+                update_query,
+                TicketStatus.CLOSED,
+                close_timestamp,
+                close_timestamp,
+                auto_resolved,
+                resolution_notes,
+                ticket_id,
+                company_id
+            )
+
+            if reason:
+                close_note_content = f"Ticket closed by {closed_by}. Reason: {reason}"
+                await self._add_system_note(ticket_id, close_note_content, closed_by)
+            else:
+                close_note_content = f"Ticket closed by {closed_by}."
+                await self._add_system_note(ticket_id, close_note_content, closed_by)
+            
+            logger.info(f"Ticket {ticket_id} successfully closed by {closed_by}")
+            return True
+            
+        except Exception as e:
+            logger.error(f"Error closing ticket {ticket_id}: {e}")
+            raise
+
+
+    async def _add_system_note(self, ticket_id: str, content: str, author: str) -> None:
+        """Add a system-generated note to a ticket"""
+        note_query = '''
+            INSERT INTO "TicketNote" (id, ticket_id, content, author, is_internal, created_at) 
+            VALUES ($1, $2, $3, $4, TRUE, NOW())
+        '''
+        await self.db.execute(
+            note_query, 
+            str(uuid.uuid4()), 
+            ticket_id, 
+            content, 
+            author
+        )
+
+
+    async def get_closable_tickets(self, company_id: str, limit: int = 50) -> List[Dict[str, Any]]:
+        try:
+            query = '''
+                SELECT id, title, status, priority, customer_name, created_at, updated_at
+                FROM "Ticket" 
+                WHERE company_id = $1 
+                AND status IN ('resolved', 'in_progress', 'open')
+                ORDER BY updated_at DESC
+                LIMIT $2
+            '''
+            
+            tickets = await self.db.fetch(query, company_id, limit)
+            return [dict(ticket) for ticket in tickets]
+            
+        except Exception as e:
+            logger.error(f"Error getting closable tickets for company {company_id}: {e}")
+            return []
