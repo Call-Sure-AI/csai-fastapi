@@ -18,6 +18,11 @@ class TicketNoteRequest(BaseModel):
     content: str
     is_internal: bool = True
 
+class TicketCloseRequest(BaseModel):
+    reason: Optional[str] = None
+    resolution_notes: Optional[str] = None
+    auto_resolved: bool = False
+
 @router.post("/companies/{company_id}/create")
 async def create_ticket(
     company_id: str,
@@ -223,4 +228,47 @@ async def get_ticket_statistics(
             raise HTTPException(
                 status_code=500,
                 detail="Failed to retrieve ticket statistics"
+            )
+
+@router.patch("/companies/{company_id}/{ticket_id}/close")
+async def close_ticket(
+    company_id: str,
+    ticket_id: str,
+    close_data: TicketCloseRequest = Body(...),
+    current_user: UserResponse = Depends(get_current_user),
+    db_context = Depends(get_db_connection),
+):
+    """Close a ticket with optional reason and resolution notes"""
+    async with db_context as db:
+        ticket_service = AutoTicketService(db)
+        
+        try:
+            success = await ticket_service.close_ticket(
+                ticket_id=ticket_id,
+                company_id=company_id,
+                closed_by=current_user.email,
+                reason=close_data.reason,
+                resolution_notes=close_data.resolution_notes,
+                auto_resolved=close_data.auto_resolved
+            )
+            
+            if not success:
+                raise HTTPException(
+                    status_code=404, 
+                    detail="Ticket not found or already closed"
+                )
+            
+            return {
+                "message": "Ticket closed successfully",
+                "ticket_id": ticket_id,
+                "closed_by": current_user.email,
+                "closed_at": datetime.utcnow().isoformat()
+            }
+            
+        except HTTPException:
+            raise
+        except Exception as e:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Failed to close ticket: {str(e)}"
             )
