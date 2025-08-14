@@ -1,8 +1,9 @@
 import logging
 from typing import List, Dict, Any, Optional, Tuple
 from datetime import datetime
-from app.models.tickets import Ticket, TicketNote, TicketStatus, TicketPriority, TicketSource
+from app.models.tickets import Ticket, TicketNote, TicketStatus, TicketPriority, TicketSource, ConversationAnalysisResult
 from app.models.conversation import Conversation
+from app.db.postgres_client import get_db_connection
 from sqlalchemy import select, update
 import uuid
 import json
@@ -24,33 +25,98 @@ class AutoTicketService:
             "low": ["minor", "small", "tiny", "cosmetic"]
         }
 
-    async def analyze_conversation_for_tickets(self, conversation_id: str, latest_messages: List[Dict[str, Any]]):
-        query = select(Conversation).where(Conversation.id == conversation_id)
-        conversation = await self.db.fetchrow(query)
-        if not conversation:
-            return None
-        combined_text = " ".join([msg.get("content", "") for msg in latest_messages]).lower()
-        issue_detected = any(keyword in combined_text for keyword in self.issue_keywords)
-        if not issue_detected:
-            return None
-        priority = self._determine_priority(combined_text)
-        title = self._generate_ticket_title(latest_messages)
-        description = self._generate_ticket_description(latest_messages, conversation)
-        ticket_data = {
-            "id": f"TKT-{str(uuid.uuid4())[:8].upper()}",
-            "company_id": conversation["company_id"],
-            "conversation_id": conversation_id,
-            "customer_id": conversation["customer_id"],
-            "title": title,
-            "description": description,
-            "priority": priority,
-            "status": TicketStatus.NEW,
-            "source": TicketSource.AUTO_GENERATED,
-            "customer_name": self._extract_customer_name(conversation),
-            "created_at": datetime.utcnow(),
-            "updated_at": datetime.utcnow(),
-        }
-        return ticket_data
+    async def analyze_conversation_for_tickets(
+        self, 
+        conversation_id: str, 
+        latest_messages: List[Dict[str, Any]]
+    ) -> Optional[ConversationAnalysisResult]:
+        
+        try:
+            conversation = None
+            try:
+                async with await get_db_connection() as conn:
+                    conversation_query = """
+                    SELECT call_id, user_phone, agent_id, status, created_at, id, duration, outcome
+                    FROM Conversation WHERE call_id = $1
+                    """
+                    conversation = await self.db.fetchrow(conversation_query, conversation_id)
+
+                    if not conversation:
+                        outcome_query = """
+                        SELECT 
+                            call_id, 
+                            user_phone, 
+                            agent_id, 
+                            'completed' as status, 
+                            created_at,
+                            id,  -- Add the id field
+                            conversation_duration as duration,
+                            outcome
+                        FROM Conversation_Outcome WHERE call_id = $1
+                        """
+                        conversation = await conn.fetchrow(outcome_query, conversation_id)
+                        logger.info(f"Found conversation in Conversation_Outcome: {conversation_id}")
+                        
+            except Exception as e:
+                logger.warning(f"Could not fetch conversation {conversation_id}: {str(e)}")
+
+            combined_text = " ".join([
+                msg.get("content", "") for msg in latest_messages
+            ]).lower()
+
+            detected_issues = []
+            confidence_score = 0.0
+            
+            for keyword in self.issue_keywords:
+                if keyword in combined_text:
+                    detected_issues.append(keyword)
+                    confidence_score += 0.1
+
+            question_indicators = ["how do i", "how to", "can you help", "?"]
+            for indicator in question_indicators:
+                if indicator in combined_text:
+                    confidence_score += 0.05
+
+            should_create_ticket = confidence_score >= 0.1 and len(detected_issues) > 0
+
+            if not should_create_ticket:
+                return ConversationAnalysisResult(
+                    should_create_ticket=False,
+                    confidence_score=confidence_score,
+                    detected_issues=detected_issues,
+                    priority=TicketPriority.MEDIUM,
+                    suggested_title="",
+                    suggested_description="",
+                    reason="No support issues detected in conversation"
+                )
+
+            priority = self._determine_priority(combined_text)
+            title = self._generate_ticket_title(latest_messages)
+
+            conversation_dict = dict(conversation) if conversation else {"call_id": conversation_id}
+            description = self._generate_ticket_description(latest_messages, conversation_dict)
+
+            return ConversationAnalysisResult(
+                should_create_ticket=True,
+                confidence_score=min(confidence_score, 1.0),
+                detected_issues=detected_issues,
+                priority=priority,
+                suggested_title=title,
+                suggested_description=description
+            )
+
+        except Exception as e:
+            logger.error(f"Error analyzing conversation {conversation_id}: {str(e)}")
+            return ConversationAnalysisResult(
+                should_create_ticket=False,
+                confidence_score=0.0,
+                detected_issues=[],
+                priority=TicketPriority.MEDIUM,
+                suggested_title="",
+                suggested_description="",
+                reason=f"Analysis failed: {str(e)}"
+            )
+
 
     def _determine_priority(self, text: str) -> str:
         for priority, keywords in self.urgency_keywords.items():
@@ -68,11 +134,27 @@ class AutoTicketService:
 
     def _generate_ticket_description(self, messages: List[Dict[str, Any]], conversation: dict) -> str:
         parts = [
-            f"Auto-generated ticket from conversation {conversation['id']} (customer: {conversation.get('customer_id','')}).",
-            "Recent messages:"
+            f"Auto-generated ticket from conversation {conversation.get('call_id', 'Unknown')}",
+            f"Data source: {conversation.get('source_table', 'Unknown')} table",
+            f"Customer Phone: {conversation.get('user_phone', 'N/A')}",
+            f"Agent: {conversation.get('agent_id', 'N/A')}",
+            ""
         ]
+
+        if conversation.get('duration'):
+            parts.insert(-1, f"Duration: {conversation['duration']} seconds")
+        
+        parts.extend([
+            "Recent conversation messages:",
+            ""
+        ])
+
         for msg in messages[-5:]:
-            parts.append(f"{msg.get('role','?')} [{msg.get('timestamp','')}] : {msg.get('content','')[:200]}")
+            role = msg.get('role', 'unknown')
+            timestamp = msg.get('timestamp', '')
+            content = msg.get('content', '')[:200]
+            parts.append(f"[{role.upper()}] {timestamp}: {content}")
+        
         return "\n".join(parts)
 
     def _extract_customer_name(self, conversation: dict) -> Optional[str]:

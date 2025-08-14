@@ -5,7 +5,11 @@ from app.models.schemas import UserResponse
 from middleware.auth_middleware import get_current_user
 from app.services.ticket_service import AutoTicketService
 from pydantic import BaseModel
+import logging
+import uuid
+from datetime import datetime
 
+logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/tickets", tags=["Tickets"])
 
 class TicketUpdateRequest(BaseModel):
@@ -60,52 +64,138 @@ async def auto_create_ticket_from_conversation(
 ):
     """Analyze conversation and auto-create ticket if support issue detected"""
     async with db_context as db:
-        ticket_service = AutoTicketService(db)
-        ticket_data = await ticket_service.analyze_conversation_for_tickets(
-            conversation_id, latest_messages
-        )
-        
-        if not ticket_data:
-            return {
-                "ticket_created": False,
-                "reason": "No support issues detected in conversation"
+        try:
+            ticket_service = AutoTicketService(db)
+            
+            # Get conversation details for customer info
+            conversation_details = None
+            try:
+                # Try Conversation table first
+                conv_query = """
+                SELECT call_id, user_phone, agent_id, created_at 
+                FROM Conversation WHERE call_id = $1
+                """
+                conversation_details = await db.fetchrow(conv_query, conversation_id)
+                
+                if not conversation_details:
+                    # Try Conversation_Outcome table
+                    outcome_query = """
+                    SELECT call_id, user_phone, agent_id, created_at 
+                    FROM Conversation_Outcome WHERE call_id = $1
+                    """
+                    conversation_details = await db.fetchrow(outcome_query, conversation_id)
+                    
+            except Exception as e:
+                logger.warning(f"Could not fetch conversation details: {str(e)}")
+            
+            # Analyze conversation
+            analysis_result = await ticket_service.analyze_conversation_for_tickets(
+                conversation_id, latest_messages
+            )
+            
+            if not analysis_result or not analysis_result.should_create_ticket:
+                return {
+                    "ticket_created": False,
+                    "reason": analysis_result.reason if analysis_result else "No support issues detected",
+                    "confidence_score": analysis_result.confidence_score if analysis_result else 0
+                }
+
+            # Create customer_id (matching your format)
+            customer_id = None
+            if conversation_details and conversation_details.get('user_phone'):
+                phone_clean = str(conversation_details['user_phone']).replace('+', '').replace('-', '').replace(' ', '')
+                customer_id = f"CUST-{phone_clean}"
+            else:
+                customer_id = f"CUST-AUTO-{str(uuid.uuid4())[:8].upper()}"
+
+            # Create ticket data matching your exact structure
+            ticket_data = {
+                "id": f"TKT-{str(uuid.uuid4())[:8].upper()}",
+                "company_id": company_id,  # This matches the URL parameter
+                "customer_id": customer_id,
+                "title": analysis_result.suggested_title,
+                "description": analysis_result.suggested_description,
+                "priority": analysis_result.priority.value,
+                "status": "new",
+                "source": "auto_generated",
+                "tags": [
+                    "auto-generated",
+                    "support",
+                    analysis_result.priority.value,
+                    *analysis_result.detected_issues[:3]  # Add first 3 detected issues as tags
+                ],
+                "meta_data": {
+                    "source": "auto_conversation_analysis",
+                    "auto_generated": True,
+                    "confidence_score": analysis_result.confidence_score,
+                    "detected_issues": analysis_result.detected_issues,
+                    "conversation_id": conversation_id,
+                    "agent_id": conversation_details.get('agent_id') if conversation_details else None,
+                    "user_phone": conversation_details.get('user_phone') if conversation_details else None,
+                    "analysis_timestamp": datetime.utcnow().isoformat()
+                },
+                "created_at": datetime.utcnow(),
+                "updated_at": datetime.utcnow()
             }
 
-        try:
+            # Remove conversation_id to avoid foreign key issues for now
+            # We store it in meta_data instead
+            
+            logger.info(f"Creating auto-ticket with data structure matching manual create")
             created_ticket = await ticket_service.create_ticket(ticket_data)
+            
             return {
                 "ticket_created": True,
                 "ticket": created_ticket,
-                "message": f"Auto-created ticket {created_ticket['id']} from conversation analysis"
+                "confidence_score": analysis_result.confidence_score,
+                "detected_issues": analysis_result.detected_issues,
+                "customer_id": customer_id,
+                "message": f"Auto-created ticket {created_ticket.get('id', 'unknown')} from conversation analysis"
             }
+            
         except Exception as e:
-            return {
-                "ticket_created": False,
-                "error": f"Failed to create ticket: {str(e)}"
-            }
+            logger.error(f"Error auto-creating ticket: {str(e)}")
+            raise HTTPException(
+                status_code=500,
+                detail=f"Failed to create ticket: {str(e)}"
+            )
+
+
 
 @router.post("/analyze-conversation/{conversation_id}")
 async def analyze_conversation_for_tickets(
     conversation_id: str,
     latest_messages: List[Dict[str, Any]] = Body(...),
     current_user: UserResponse = Depends(get_current_user),
-    db_context = Depends(get_db_connection),
 ):
-    async with db_context as db:
-        ticket_service = AutoTicketService(db)
-        ticket_data = await ticket_service.analyze_conversation_for_tickets(
-            conversation_id, latest_messages
-        )
+    try:
+        async with await get_db_connection() as db:
+            ticket_service = AutoTicketService(db)
+            analysis_result = await ticket_service.analyze_conversation_for_tickets(
+                conversation_id, latest_messages
+            )
         
-        if not ticket_data:
-            return {"should_create_ticket": False, "reason": "No support issues detected"}
+        if not analysis_result:
+            return {
+                "should_create_ticket": False,
+                "reason": "Analysis failed"
+            }
         
         return {
-            "should_create_ticket": True,
-            "ticket_data": ticket_data,
-            "message": "Support issue detected. Ticket data generated."
+            "should_create_ticket": analysis_result.should_create_ticket,
+            "confidence_score": analysis_result.confidence_score,
+            "detected_issues": analysis_result.detected_issues,
+            "priority": analysis_result.priority.value,
+            "suggested_title": analysis_result.suggested_title,
+            "suggested_description": analysis_result.suggested_description,
+            "reason": analysis_result.reason
         }
-
+    except Exception as e:
+        logger.error(f"Error analyzing conversation: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Analysis failed: {str(e)}"
+        )
 
 @router.get("/companies/{company_id}")
 async def get_company_tickets(
