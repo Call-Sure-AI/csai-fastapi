@@ -6,6 +6,8 @@ from typing import Optional
 from app.db.postgres_client import postgres_client
 from app.models.schemas import UserResponse
 import logging
+from config import JWT_SECRET
+from fastapi import HTTPException
 
 logger = logging.getLogger(__name__)
 security = HTTPBearer()
@@ -114,3 +116,12 @@ async def get_current_user_optional(
         return await get_current_user(credentials)
     except:
         return None
+
+async def verify_websocket_token(token: str) -> dict:
+    try:
+        payload = jwt.decode(token, JWT_SECRET, algorithms=["HS256"])
+        return payload
+    except jwt.ExpiredSignatureError:
+        raise HTTPException(status_code=401, detail="Token expired")
+    except jwt.InvalidTokenError:
+        raise HTTPException(status_code=401, detail="Invalid token")

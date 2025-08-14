@@ -5,6 +5,8 @@ from routes.agent import router as agent_router
 from routes.company import router as company_router
 #from routes.conversation import conversation_router
 #from routes.customer import customer_router
+from routes.analytics import router as analytics_router
+from routes.conversation import router as conversation_router
 from routes.email import router as email_router
 from routes.invitation import router as invitation_router
 from routes.s3 import router as s3_router
