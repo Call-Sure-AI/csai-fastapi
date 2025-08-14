@@ -1,9 +1,7 @@
-from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Depends, Query
-import asyncpg
+from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Query, HTTPException
 import json
 import logging
 
-from app.db.postgres_client import get_db_pool
 from handlers.conversation_handler import get_conversation_manager
 from middleware.auth_middleware import verify_websocket_token
 
@@ -15,9 +13,9 @@ async def websocket_endpoint(
     websocket: WebSocket,
     call_id: str,
     agent_id: str = Query(...),
-    token: str = Query(...),
-    db_pool: asyncpg.Pool = Depends(get_db_pool)
+    token: str = Query(...)
 ):
+
     try:
         user_data = await verify_websocket_token(token)
         if not user_data:
@@ -27,7 +25,7 @@ async def websocket_endpoint(
         await websocket.close(code=4001, reason="Invalid token")
         return
 
-    manager = get_conversation_manager(db_pool)
+    manager = get_conversation_manager()
     
     try:
         await manager.connect(websocket, call_id, agent_id)
@@ -67,10 +65,20 @@ async def websocket_endpoint(
         manager.disconnect(call_id)
 
 @router.get("/active-calls")
-async def get_active_calls(
-    db_pool: asyncpg.Pool = Depends(get_db_pool)
-):
-    """Get list of active calls"""
-    manager = get_conversation_manager(db_pool)
+async def get_active_calls():
+    manager = get_conversation_manager()
     active_calls = list(manager.active_connections.keys())
     return {"active_calls": active_calls, "count": len(active_calls)}
+
+@router.get("/conversation-history")
+async def get_conversation_history(
+    agent_id: str = Query(None),
+    limit: int = Query(50)
+):
+    try:
+        from app.db.queries.conversation_queries import ConversationQueries
+        queries = ConversationQueries()
+        history = await queries.get_conversation_history(agent_id, limit)
+        return {"conversations": history}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))

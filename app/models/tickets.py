@@ -4,6 +4,8 @@ from sqlalchemy.orm import declarative_base, relationship
 import enum
 from datetime import datetime
 import uuid
+from pydantic import BaseModel, Field
+from typing import Dict, Any, Optional, List
 
 Base = declarative_base()
 
@@ -61,3 +63,12 @@ class TicketNote(Base):
     is_internal = Column(Boolean, default=True)
     created_at = Column(DateTime, default=datetime.utcnow)
     ticket = relationship("Ticket", back_populates="notes")
+
+class ConversationAnalysisResult(BaseModel):
+    should_create_ticket: bool
+    confidence_score: float
+    detected_issues: List[str]
+    priority: TicketPriority
+    suggested_title: str
+    suggested_description: str
+    reason: Optional[str] = None

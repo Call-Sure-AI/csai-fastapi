@@ -3,23 +3,21 @@ import json
 import uuid
 from typing import Dict, Any, Optional
 from datetime import datetime
-import asyncpg
-from fastapi import WebSocket, WebSocketDisconnect
 import logging
 
 from handlers.analytics_handler import AnalyticsHandler
 from app.db.queries.conversation_queries import ConversationQueries
+from app.db.postgres_client import get_db_connection
 
 logger = logging.getLogger(__name__)
 
 class ConversationManager:
-    def __init__(self, db_pool: asyncpg.Pool):
-        self.db_pool = db_pool
-        self.active_connections: Dict[str, WebSocket] = {}
+    def __init__(self):
+        self.active_connections: Dict[str, Any] = {}
         self.conversation_data: Dict[str, Dict] = {}
-        self.analytics_handler = AnalyticsHandler(db_pool)
+        self.analytics_handler = AnalyticsHandler()
 
-    async def connect(self, websocket: WebSocket, call_id: str, agent_id: str):
+    async def connect(self, websocket, call_id: str, agent_id: str):
         await websocket.accept()
         self.active_connections[call_id] = websocket
 
@@ -81,7 +79,6 @@ class ConversationManager:
 
             conversation_queries = ConversationQueries()
             await conversation_queries.create_conversation(
-                self.db_pool,
                 call_id,
                 message_data.get('phone'),
                 self.conversation_data[call_id]['agent_id']
@@ -96,7 +93,7 @@ class ConversationManager:
     async def _handle_transcript_update(self, call_id: str, message_data: dict):
         if call_id in self.conversation_data:
             transcript_chunk = message_data.get('transcript', '')
-            speaker = message_data.get('speaker', 'unknown')  # 'user' or 'agent'
+            speaker = message_data.get('speaker', 'unknown')
 
             self.conversation_data[call_id]['messages'].append({
                 'speaker': speaker,
@@ -116,7 +113,7 @@ class ConversationManager:
     async def _handle_agent_response(self, call_id: str, message_data: dict):
         if call_id in self.conversation_data:
             response_text = message_data.get('response', '')
-            action = message_data.get('action')  # 'send_message', 'schedule_callback', etc.
+            action = message_data.get('action')
             
             if action == 'send_message':
                 await self._handle_transcript_update(call_id, {
@@ -158,7 +155,6 @@ class ConversationManager:
 
         conversation_queries = ConversationQueries()
         await conversation_queries.update_conversation_outcome(
-            self.db_pool,
             call_id,
             outcome,
             json.dumps(conversation['messages']),
@@ -191,7 +187,6 @@ class ConversationManager:
             return 'incomplete'
 
     def calculate_lead_score(self, conversation_data: dict) -> int:
-        """Calculate lead score based on conversation quality"""
         score = 50
         
         transcript = conversation_data.get('transcript', '').lower()
@@ -214,6 +209,7 @@ class ConversationManager:
         return max(min(score, 100), 0)
 
     def extract_customer_details(self, conversation_data: dict) -> Dict[str, Any]:
+        """Extract customer details from conversation"""
         transcript = conversation_data.get('transcript', '').lower()
         details = conversation_data.get('user_details', {})
 
@@ -224,19 +220,13 @@ class ConversationManager:
             'engagement_level': 'high' if conversation_data.get('duration', 0) > 120 else 'medium'
         }
         
-        # You can enhance this with NLP to extract:
-        # - Company name
-        # - Budget mentions
-        # - Timeline mentions
-        # - Pain points
-        # - Decision maker info
-        
         return extracted
+
 
 conversation_manager = None
 
-def get_conversation_manager(db_pool: asyncpg.Pool) -> ConversationManager:
+def get_conversation_manager() -> ConversationManager:
     global conversation_manager
     if conversation_manager is None:
-        conversation_manager = ConversationManager(db_pool)
+        conversation_manager = ConversationManager()
     return conversation_manager

@@ -1,11 +1,11 @@
 from typing import List, Dict, Any, Optional
 from datetime import datetime, date
-import asyncpg
+from app.db.postgres_client import get_db_connection
+import json
 
 class AnalyticsQueries:
     @staticmethod
     async def create_conversation_outcome(
-        pool: asyncpg.Pool,
         call_id: str,
         user_phone: str,
         conversation_duration: int,
@@ -21,14 +21,17 @@ class AnalyticsQueries:
         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
         RETURNING id
         """
-        async with pool.acquire() as conn:
-            return await conn.fetchval(
-                query, call_id, user_phone, conversation_duration, 
-                outcome, lead_score, extracted_details, agent_id, datetime.utcnow()
+        
+        async with await get_db_connection() as conn:
+            result = await conn.fetchval(
+                query, 
+                call_id, user_phone, conversation_duration, outcome, 
+                lead_score, json.dumps(extracted_details), agent_id, datetime.utcnow()
             )
+            return result
 
     @staticmethod
-    async def get_daily_analytics(pool: asyncpg.Pool, start_date: date, end_date: date):
+    async def get_daily_analytics(start_date: date, end_date: date):
         query = """
         SELECT 
             DATE(created_at) as date,
@@ -44,14 +47,19 @@ class AnalyticsQueries:
         GROUP BY DATE(created_at)
         ORDER BY date DESC
         """
-        async with pool.acquire() as conn:
+        
+        async with await get_db_connection() as conn:
             rows = await conn.fetch(query, start_date, end_date)
             return [dict(row) for row in rows]
 
     @staticmethod
-    async def get_agent_performance(pool: asyncpg.Pool, agent_id: Optional[str] = None):
-        where_clause = "WHERE agent_id = $1" if agent_id else ""
-        params = [agent_id] if agent_id else []
+    async def get_agent_performance(agent_id: Optional[str] = None):
+        if agent_id:
+            where_clause = "WHERE agent_id = $1"
+            params = [agent_id]
+        else:
+            where_clause = ""
+            params = []
         
         query = f"""
         SELECT 
@@ -66,12 +74,13 @@ class AnalyticsQueries:
         GROUP BY agent_id
         ORDER BY conversion_rate DESC
         """
-        async with pool.acquire() as conn:
+        
+        async with await get_db_connection() as conn:
             rows = await conn.fetch(query, *params)
             return [dict(row) for row in rows]
 
     @staticmethod
-    async def get_lead_details(pool: asyncpg.Pool, outcome: str = 'interested'):
+    async def get_lead_details(outcome: str = 'interested'):
         query = """
         SELECT 
             call_id,
@@ -84,7 +93,20 @@ class AnalyticsQueries:
         FROM Conversation_Outcome 
         WHERE outcome = $1
         ORDER BY created_at DESC
+        LIMIT 100
         """
-        async with pool.acquire() as conn:
+        
+        async with await get_db_connection() as conn:
             rows = await conn.fetch(query, outcome)
-            return [dict(row) for row in rows]
+            results = []
+            for row in rows:
+                row_dict = dict(row)
+                if isinstance(row_dict['extracted_details'], str):
+                    try:
+                        row_dict['extracted_details'] = json.loads(row_dict['extracted_details'])
+                    except (json.JSONDecodeError, TypeError):
+                        row_dict['extracted_details'] = {}
+                elif row_dict['extracted_details'] is None:
+                    row_dict['extracted_details'] = {}
+                results.append(row_dict)
+            return results
