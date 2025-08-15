@@ -13,7 +13,6 @@ company_handler = CompanyHandler()
 async def get_company(
     current_user: UserResponse = Depends(get_current_user)
 ):
-    """Get company for current user - equivalent to Node's getById"""
     try:
         user_id = current_user.id
         company = await company_handler.get_company_by_user(user_id)
