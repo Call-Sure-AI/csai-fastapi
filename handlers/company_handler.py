@@ -30,7 +30,7 @@ class CompanyHandler:
                             company[field] = {} if field == 'prompt_templates' else None
                         else:
                             parsed_data = json.loads(company[field])
-                            company[field] = parsed_data  # ✅ Convert to dict
+                            company[field] = parsed_data
                     except (json.JSONDecodeError, TypeError) as e:
                         logger.warning(f"Failed to parse JSON field {field}: {company[field]}, error: {e}")
                         company[field] = {} if field == 'prompt_templates' else None

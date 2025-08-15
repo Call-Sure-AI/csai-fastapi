@@ -11,7 +11,6 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/email", tags=["email"])
 email_handler = EmailHandler()
 
-# Response model for queued emails
 class QueuedEmailResponse(BaseModel):
     status: str = "queued"
     message: str = "Email has been queued for delivery"
@@ -22,7 +21,6 @@ class QueuedEmailResponse(BaseModel):
             data['queued_at'] = datetime.utcnow()
         super().__init__(**data)
 
-# Background task functions
 async def send_email_background(email_request: dict, user_id: str):
     """Background task to send email"""
     try:
@@ -45,7 +43,6 @@ async def send_bulk_background(recipients: List[str], subject: str, html: str, b
     """Background task to send bulk emails in batches"""
     try:
         handler = EmailHandler()
-        # Process in batches to avoid overwhelming the email server
         for i in range(0, len(recipients), batch_size):
             batch = recipients[i:i + batch_size]
             await handler.send_bulk_emails(batch, subject, html)
@@ -62,20 +59,17 @@ async def send_template_background(to: str, template_name: str, template_data: d
     except Exception as e:
         logger.error(f"Failed to send template email in background: {e}")
 
-# Optimized routes with background tasks
 @router.post("/send", response_model=QueuedEmailResponse)
 async def send_email(
     email_request: EmailRequest,
     background_tasks: BackgroundTasks,
     current_user: UserResponse = Depends(get_current_user)
 ):
-    """Send email asynchronously - returns immediately"""
+
     try:
-        # Validate email request
         if not email_request.to or not email_request.subject:
             raise HTTPException(status_code=400, detail="Missing required fields")
-        
-        # Add to background tasks
+
         background_tasks.add_task(
             send_email_background,
             email_request.dict(),

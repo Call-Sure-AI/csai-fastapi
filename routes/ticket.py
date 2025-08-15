@@ -122,7 +122,7 @@ async def auto_create_ticket_from_conversation(
                     "auto-generated",
                     "support",
                     analysis_result.priority.value,
-                    *analysis_result.detected_issues[:3]  # Add first 3 detected issues as tags
+                    *analysis_result.detected_issues[:3]
                 ],
                 "meta_data": {
                     "source": "auto_conversation_analysis",
@@ -137,9 +137,6 @@ async def auto_create_ticket_from_conversation(
                 "created_at": datetime.utcnow(),
                 "updated_at": datetime.utcnow()
             }
-
-            # Remove conversation_id to avoid foreign key issues for now
-            # We store it in meta_data instead
             
             logger.info(f"Creating auto-ticket with data structure matching manual create")
             created_ticket = await ticket_service.create_ticket(ticket_data)
