@@ -1,19 +1,95 @@
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, BackgroundTasks
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, BackgroundTasks, Query
+from fastapi.responses import StreamingResponse
 from typing import List, Optional
 import uuid
 import logging
 from datetime import datetime
 
-from app.models.schemas import UserResponse
-from app.models.campaigns import CreateCampaignRequest, CampaignResponse
+from app.models.schemas import UserResponse, AgentCreate, LeadCreate, LeadUpdate, Lead, LeadsBulkUpdate
+from app.models.campaigns import CreateCampaignRequest, CampaignResponse, UpdateCampaignRequest
 from middleware.auth_middleware import get_current_user
 from app.services.campaign_service import CampaignService
+import io, csv
 
 from routes.email import send_email_background
 from handlers.company_handler import CompanyHandler
+from handlers.agent_handler import AgentHandler
+from app.models.schemas import AgentUpdate
+from app.models.campaigns import AgentAssignRequest, AgentSettingsPayload
+from app.db.postgres_client import get_db_connection
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/campaigns", tags=["Campaigns"])
+
+svc  = CampaignService()
+
+@router.post("/{campaign_id}/start", status_code=200)
+async def start_campaign(
+    campaign_id: str,
+    background_tasks: BackgroundTasks,
+    current_user:    UserResponse   = Depends(get_current_user),
+    company_handler: CompanyHandler = Depends(CompanyHandler),
+):
+
+    company = await company_handler.get_company_by_user(current_user.id)
+    if not company:
+        raise HTTPException(400, "User has no company")
+    company_id = company["id"]
+
+    #svc  = CampaignService()
+    camp = await svc.get_campaign(campaign_id, company_id)
+    if not camp:
+        raise HTTPException(404, "Campaign not found")
+
+    if camp.status == "active":
+        return {"message": f"Campaign {campaign_id} is already active"}
+
+    payload  = UpdateCampaignRequest(status="active")
+    updated  = await svc.update_campaign(campaign_id, company_id, payload)
+    if not updated:
+        raise HTTPException(500, "Failed to activate campaign")
+
+    background_tasks.add_task(
+        _activate_ai_agents,
+        campaign_id,
+        company_id,
+        current_user.id
+    )
+
+    return {"message": f"Campaign {campaign_id} started – AI agents launching"}
+
+async def _activate_ai_agents(
+    campaign_id: str,
+    company_id: str,
+    user_id:    str,
+    agent_handler: AgentHandler = Depends(AgentHandler)
+):
+
+    log.info("AI-bootstrap: scanning agents for user=%s company=%s", user_id, company_id)
+
+    agents = await agent_handler.get_agents_by_user_id(user_id)
+    if agents:
+        update_req = AgentUpdate(is_active=True)
+        for a in agents:
+            try:
+                await agent_handler.update_agent(a["id"], update_req, user_id)
+                log.info("Activated agent %s", a["id"])
+            except Exception as e:
+                log.warning("Agent %s activation failed: %s", a["id"], e)
+    else:
+        new_agent = AgentCreate(
+            name           = f"{campaign_id}-agent",
+            type           = "campaign",
+            is_active      = True,
+            company_id     = company_id,
+            prompt         = f"Handle outreach for campaign {campaign_id}",
+            additional_context = {"campaign_id": campaign_id},
+        )
+        try:
+            created = await agent_handler.create_agent(new_agent, user_id)
+            log.info("Created & activated default agent %s for campaign %s", created["id"], campaign_id)
+        except Exception as e:
+            log.error("Could not create default agent for campaign %s: %s", campaign_id, e)
 
 @router.post("/create", response_model=CampaignResponse)
 async def create_campaign(
@@ -161,3 +237,369 @@ async def setup_campaign_automation(
         
     except Exception as e:
         logger.error(f"Error setting up campaign automation: {str(e)}")
+
+@router.put("/{campaign_id}", response_model=CampaignResponse)
+async def update_campaign(
+    campaign_id: str,
+    payload: UpdateCampaignRequest,
+    current_user: UserResponse = Depends(get_current_user),
+    company_handler: CompanyHandler = Depends(CompanyHandler),
+):
+    company = await company_handler.get_company_by_user(current_user.id)
+    if not company:
+        raise HTTPException(400, "User has no company")
+    company_id = company["id"]
+
+    svc = CampaignService()
+    updated = await svc.update_campaign(campaign_id, company_id, payload)
+    if not updated:
+        raise HTTPException(404, "Campaign not found")
+    return updated
+
+
+@router.delete("/{campaign_id}", status_code=204)
+async def delete_campaign(
+    campaign_id: str,
+    current_user: UserResponse = Depends(get_current_user),
+    company_handler: CompanyHandler = Depends(CompanyHandler),
+):
+    company = await company_handler.get_company_by_user(current_user.id)
+    if not company:
+        raise HTTPException(400, "User has no company")
+    company_id = company["id"]
+
+    svc = CampaignService()
+    deleted = await svc.delete_campaign(campaign_id, company_id)
+    if not deleted:
+        raise HTTPException(404, "Campaign not found")
+
+async def _set_status(
+    campaign_id: str,
+    company_id: str,
+    status: str,
+    svc: CampaignService
+):
+    camp = await svc.get_campaign(campaign_id, company_id)
+    if not camp:
+        raise HTTPException(404, "Campaign not found")
+
+    if camp.status == status:
+        return {"message": f"Campaign {campaign_id} is already {status}"}
+
+    payload = UpdateCampaignRequest(status=status)
+    if not await svc.update_campaign(campaign_id, company_id, payload):
+        raise HTTPException(500, f"Could not set status to {status}")
+
+    return {"message": f"Campaign {campaign_id} marked {status}"}
+
+@router.post("/{campaign_id}/pause", status_code=200)
+async def pause_campaign(
+    campaign_id: str,
+    current_user:    UserResponse   = Depends(get_current_user),
+    company_handler: CompanyHandler = Depends(CompanyHandler),
+):
+    company_id = (await company_handler.get_company_by_user(current_user.id))["id"]
+    return await _set_status(campaign_id, company_id, "paused", CampaignService())
+
+@router.post("/{campaign_id}/resume", status_code=200)
+async def resume_campaign(
+    campaign_id: str,
+    current_user:    UserResponse   = Depends(get_current_user),
+    company_handler: CompanyHandler = Depends(CompanyHandler),
+):
+    company_id = (await company_handler.get_company_by_user(current_user.id))["id"]
+    return await _set_status(campaign_id, company_id, "active", CampaignService())
+
+@router.post("/{campaign_id}/complete", status_code=200)
+async def complete_campaign(
+    campaign_id: str,
+    current_user:    UserResponse   = Depends(get_current_user),
+    company_handler: CompanyHandler = Depends(CompanyHandler),
+):
+    company_id = (await company_handler.get_company_by_user(current_user.id))["id"]
+    return await _set_status(campaign_id, company_id, "completed", CampaignService())
+
+@router.post("/{campaign_id}/duplicate", status_code=201)
+async def duplicate_campaign(
+    campaign_id: str,
+    current_user:    UserResponse   = Depends(get_current_user),
+    company_handler: CompanyHandler = Depends(CompanyHandler),
+):
+    company_id = (await company_handler.get_company_by_user(current_user.id))["id"]
+    svc        = CampaignService()
+
+    orig = await svc.get_campaign(campaign_id, company_id)
+    if not orig:
+        raise HTTPException(404, "Campaign not found")
+
+    new_id = f"CAMP-{uuid.uuid4().hex[:8].upper()}"
+    now    = datetime.utcnow()
+
+    req = CreateCampaignRequest(
+        campaign_name = f"Copy of {orig.campaign_name}",
+        description   = orig.description,
+        data_mapping  = orig.data_mapping,
+        booking       = orig.booking,
+        automation    = orig.automation,
+    )
+
+    clone = await svc.create_campaign(
+        campaign_request = req,
+        company_id       = company_id,
+        created_by       = current_user.id,
+        csv_content      = "",
+    )
+
+    await svc.update_campaign(
+        clone.id, company_id,
+        UpdateCampaignRequest(
+            campaign_name = req.campaign_name,
+            status        = "draft",
+        )
+    )
+
+    return {"message": "Campaign duplicated", "new_campaign": clone}
+
+async def _ensure_campaign(c_id: str, comp_id: str):
+    if not await svc.get_campaign(c_id, comp_id):
+        raise HTTPException(404, "Campaign not found")
+
+@router.get("/{campaign_id}/agents")
+async def list_agents(
+    campaign_id: str,
+    current: UserResponse = Depends(get_current_user),
+    ch: CompanyHandler    = Depends(CompanyHandler),
+):
+    comp_id = (await ch.get_company_by_user(current.id))["id"]
+    await _ensure_campaign(campaign_id, comp_id)
+    return await svc.get_agents(campaign_id)
+
+@router.post("/{campaign_id}/agents/assign", status_code=201)
+async def assign_agents(
+    campaign_id: str,
+    body: AgentAssignRequest,
+    current: UserResponse = Depends(get_current_user),
+    ch: CompanyHandler    = Depends(CompanyHandler),
+):
+    comp_id = (await ch.get_company_by_user(current.id))["id"]
+    await _ensure_campaign(campaign_id, comp_id)
+    await svc.assign_agents(campaign_id, body.agent_ids)
+    return {"message": f"{len(body.agent_ids)} agent(s) assigned"}
+
+@router.delete("/{campaign_id}/agents/{agent_id}", status_code=204)
+async def remove_agent(
+    campaign_id: str, agent_id: str,
+    current: UserResponse = Depends(get_current_user),
+    ch: CompanyHandler    = Depends(CompanyHandler),
+):
+    comp_id = (await ch.get_company_by_user(current.id))["id"]
+    await _ensure_campaign(campaign_id, comp_id)
+    if not await svc.unassign_agent(campaign_id, agent_id):
+        raise HTTPException(404, "Agent not assigned to this campaign")
+
+@router.put("/{campaign_id}/agents/settings")
+async def bulk_update_settings(
+    campaign_id: str,
+    body: AgentSettingsPayload,
+    current: UserResponse = Depends(get_current_user),
+    ch: CompanyHandler    = Depends(CompanyHandler),
+    agent_handler: AgentHandler = Depends(AgentHandler)
+):
+    if body.model_dump(exclude_none=True) == {}:
+        raise HTTPException(400, "No settings provided")
+
+    comp_id = (await ch.get_company_by_user(current.id))["id"]
+    await _ensure_campaign(campaign_id, comp_id)
+
+    updated = await svc.update_agent_settings(
+        campaign_id, body, current.id, agent_handler
+    )
+    return {"message": f"Updated {updated} agent(s)"}
+
+async def _check_owner(c_id: str, user: UserResponse, ch: CompanyHandler):
+    comp = await ch.get_company_by_user(user.id)
+    if not comp:
+        raise HTTPException(400, "User has no company")
+    if not await svc.get_campaign(c_id, comp["id"]):
+        raise HTTPException(404, "Campaign not found")
+
+@router.get("/{campaign_id}/metrics")
+async def realtime_metrics(
+    campaign_id: str,
+    current: UserResponse = Depends(get_current_user),
+    ch: CompanyHandler    = Depends(CompanyHandler),
+):
+    await _check_owner(campaign_id, current, ch)
+    return await svc.get_realtime_metrics(campaign_id)
+
+@router.get("/{campaign_id}/metrics/history")
+async def metrics_history(
+    campaign_id: str,
+    days: int = Query(30, ge=1, le=180),
+    current: UserResponse = Depends(get_current_user),
+    ch: CompanyHandler    = Depends(CompanyHandler),
+):
+    await _check_owner(campaign_id, current, ch)
+    return await svc.get_metrics_history(campaign_id, days_back=days)
+
+@router.get("/{campaign_id}/call-logs")
+async def call_logs(
+    campaign_id: str,
+    limit: int = Query(100, ge=1, le=1000),
+    current: UserResponse = Depends(get_current_user),
+    ch: CompanyHandler    = Depends(CompanyHandler),
+):
+    await _check_owner(campaign_id, current, ch)
+    return await svc.get_call_logs(campaign_id, limit)
+
+@router.get("/{campaign_id}/bookings")
+async def campaign_bookings(
+    campaign_id: str,
+    current: UserResponse = Depends(get_current_user),
+    ch: CompanyHandler    = Depends(CompanyHandler),
+):
+    await _check_owner(campaign_id, current, ch)
+    return await svc.get_bookings(campaign_id)
+
+@router.get("/analytics/summary")
+async def analytics_summary(
+    current: UserResponse = Depends(get_current_user),
+    ch: CompanyHandler    = Depends(CompanyHandler),
+):
+    return await svc.get_overall_summary()
+
+async def _ensure_campaign_access(campaign_id: str, user: UserResponse, ch: CompanyHandler):
+    comp = await ch.get_company_by_user(user.id)
+    if not comp:
+        raise HTTPException(400, "User has no company")
+    svc = CampaignService()
+    if not await svc.get_campaign(campaign_id, comp["id"]):
+        raise HTTPException(404, "Campaign not found")
+    return comp["id"]
+
+@router.post("/{campaign_id}/leads/upload")
+async def upload_leads_csv(
+    campaign_id: str,
+    leads_csv: UploadFile = File(...),
+    current_user: UserResponse = Depends(get_current_user),
+    company_handler: CompanyHandler = Depends(CompanyHandler),
+):
+    await _ensure_campaign_access(campaign_id, current_user, company_handler)
+    
+    if not leads_csv.filename.lower().endswith('.csv'):
+        raise HTTPException(400, "File must be a CSV")
+    
+    content = await leads_csv.read()
+    content_str = content.decode('utf-8')
+    
+    svc = CampaignService()
+    count = await svc.import_leads_csv(campaign_id, content_str, current_user.id)
+    
+    return {"message": f"Successfully imported {count} leads"}
+
+@router.get("/{campaign_id}/leads")
+async def get_leads(
+    campaign_id: str,
+    offset: int = Query(0, ge=0),
+    limit: int = Query(100, ge=1, le=1000),
+    current_user: UserResponse = Depends(get_current_user),
+    company_handler: CompanyHandler = Depends(CompanyHandler),
+):
+    await _ensure_campaign_access(campaign_id, current_user, company_handler)
+    
+    svc = CampaignService()
+    leads = await svc.get_leads(campaign_id, offset, limit)
+    
+    return leads
+
+@router.post("/{campaign_id}/leads", status_code=201)
+async def add_lead(
+    campaign_id: str,
+    lead: LeadCreate,
+    current_user: UserResponse = Depends(get_current_user),
+    company_handler: CompanyHandler = Depends(CompanyHandler),
+):
+    await _ensure_campaign_access(campaign_id, current_user, company_handler)
+    
+    svc = CampaignService()
+    new_lead = await svc.add_lead(campaign_id, lead, current_user.id)
+    
+    return new_lead
+
+@router.put("/{campaign_id}/leads/{lead_id}")
+async def update_lead(
+    campaign_id: str,
+    lead_id: str,
+    lead: LeadUpdate,
+    current_user: UserResponse = Depends(get_current_user),
+    company_handler: CompanyHandler = Depends(CompanyHandler),
+):
+    await _ensure_campaign_access(campaign_id, current_user, company_handler)
+    
+    svc = CampaignService()
+    updated = await svc.update_lead(campaign_id, lead_id, lead, current_user.id)
+    
+    if not updated:
+        raise HTTPException(404, "Lead not found")
+    
+    return updated
+
+@router.delete("/{campaign_id}/leads/{lead_id}", status_code=204)
+async def delete_lead(
+    campaign_id: str,
+    lead_id: str,
+    current_user: UserResponse = Depends(get_current_user),
+    company_handler: CompanyHandler = Depends(CompanyHandler),
+):
+    await _ensure_campaign_access(campaign_id, current_user, company_handler)
+    
+    svc = CampaignService()
+    deleted = await svc.delete_lead(campaign_id, lead_id)
+    
+    if not deleted:
+        raise HTTPException(404, "Lead not found")
+
+@router.post("/{campaign_id}/leads/bulk")
+async def bulk_update_leads(
+    campaign_id: str,
+    bulk: LeadsBulkUpdate,
+    current_user: UserResponse = Depends(get_current_user),
+    company_handler: CompanyHandler = Depends(CompanyHandler),
+):
+    await _ensure_campaign_access(campaign_id, current_user, company_handler)
+    
+    svc = CampaignService()
+    updated_count = await svc.bulk_update_leads(campaign_id, bulk)
+    
+    return {"message": f"Updated {updated_count} lead(s)"}
+
+@router.get("/{campaign_id}/leads/export")
+async def export_leads(
+    campaign_id: str,
+    current_user: UserResponse = Depends(get_current_user),
+    company_handler: CompanyHandler = Depends(CompanyHandler),
+):
+    await _ensure_campaign_access(campaign_id, current_user, company_handler)
+    
+    svc = CampaignService()
+    leads = await svc.get_all_leads(campaign_id)
+    
+    output = io.StringIO()
+    writer = csv.writer(output)
+
+    writer.writerow(['id', 'first_name', 'last_name', 'email', 'phone', 'company', 'status', 'call_attempts'])
+
+    for lead in leads:
+        writer.writerow([
+            lead.get('id'), lead.get('first_name'), lead.get('last_name'),
+            lead.get('email'), lead.get('phone'), lead.get('company'),
+            lead.get('status'), lead.get('call_attempts', 0)
+        ])
+    
+    output.seek(0)
+    
+    return StreamingResponse(
+        io.BytesIO(output.getvalue().encode('utf-8')),
+        media_type="text/csv",
+        headers={"Content-Disposition": f"attachment; filename={campaign_id}_leads.csv"}
+    )

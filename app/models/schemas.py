@@ -234,7 +234,7 @@ class Agent(AgentBase):
     
     class Config:
         from_attributes = True
-
+    
 class NotificationPreferences(BaseModel):
     email: Optional[bool] = None
     sms: Optional[bool] = None
@@ -700,3 +700,39 @@ class WhatsAppWebhookVerification(BaseModel):
 
     class Config:
         allow_population_by_field_name = True
+
+class LeadCreate(BaseModel):
+    first_name: str = Field(..., max_length=255)
+    last_name: Optional[str] = Field(None, max_length=255)
+    email: str = Field(..., max_length=255)
+    phone: Optional[str] = Field(None, max_length=50)
+    company: Optional[str] = Field(None, max_length=255)
+    custom_fields: Optional[Dict[str, Any]] = {}
+
+class LeadUpdate(BaseModel):
+    first_name: Optional[str] = Field(None, max_length=255)
+    last_name: Optional[str] = Field(None, max_length=255)
+    email: Optional[str] = Field(None, max_length=255)
+    phone: Optional[str] = Field(None, max_length=50)
+    company: Optional[str] = Field(None, max_length=255)
+    status: Optional[str] = Field(None, max_length=50)
+    custom_fields: Optional[Dict[str, Any]] = None
+
+class Lead(BaseModel):
+    id: str
+    campaign_id: str
+    first_name: str
+    last_name: Optional[str]
+    email: str
+    phone: Optional[str]
+    company: Optional[str]
+    custom_fields: Dict[str, Any] = {}
+    call_attempts: int = 0
+    last_call_at: Optional[datetime]
+    status: str = "pending"
+    created_at: datetime
+    updated_at: datetime
+
+class LeadsBulkUpdate(BaseModel):
+    lead_ids: List[str]
+    updates: LeadUpdate
