@@ -1,7 +1,7 @@
 import uuid
 from pydantic import BaseModel, Field, EmailStr, HttpUrl, field_validator, validator
 from typing import Optional, Dict, List, Any, Literal
-from datetime import datetime
+from datetime import datetime, time
 import re
 from enum import Enum
 
@@ -736,3 +736,187 @@ class Lead(BaseModel):
 class LeadsBulkUpdate(BaseModel):
     lead_ids: List[str]
     updates: LeadUpdate
+
+class CSVParseResponse(BaseModel):
+    headers: List[str]
+    preview_rows: List[List[str]]
+    total_rows: int
+    detected_delimiter: str
+
+class CSVValidateRequest(BaseModel):
+    csv_content: str
+    expected_headers: Optional[List[str]] = None
+    required_fields: Optional[List[str]] = None
+
+class CSVValidationError(BaseModel):
+    row: int
+    column: str
+    error: str
+    value: str
+
+class CSVValidateResponse(BaseModel):
+    is_valid: bool
+    errors: List[CSVValidationError]
+    summary: Dict[str, Any]
+
+class FieldMapping(BaseModel):
+    csv_column: str
+    system_field: str
+    required: bool = False
+    transform: Optional[str] = None
+
+class CSVMapFieldsRequest(BaseModel):
+    csv_headers: List[str]
+    mappings: List[FieldMapping]
+    
+class CSVMapFieldsResponse(BaseModel):
+    mapped_fields: Dict[str, str]
+    unmapped_columns: List[str]
+    missing_required: List[str]
+    preview_mapping: Dict[str, Any]
+
+class BookingSettings(BaseModel):
+    calendar_type: str = Field(..., description="google, outlook, calendly")
+    meeting_duration_minutes: int = Field(30, ge=15, le=180)
+    buffer_time_minutes: int = Field(15, ge=0, le=60)
+    send_invite_to_lead: bool = True
+    send_invite_to_team: bool = True
+    team_email_addresses: List[str] = []
+    booking_window_days: int = Field(30, ge=1, le=90)
+    min_notice_hours: int = Field(2, ge=1, le=48)
+    max_bookings_per_day: Optional[int] = Field(None, ge=1, le=50)
+
+class EmailSettings(BaseModel):
+    template: str = Field(..., min_length=10)
+    subject_line: str = Field(..., min_length=5, max_length=100)
+    from_name: str = Field(..., min_length=2, max_length=50)
+    from_email: str = Field(..., patttern=r'^[^@]+@[^@]+\.[^@]+$')
+    enable_followup: bool = True
+    followup_delay_hours: int = Field(24, ge=1, le=168)
+    max_followup_attempts: int = Field(3, ge=1, le=10)
+    unsubscribe_link: bool = True
+    track_opens: bool = True
+    track_clicks: bool = True
+
+class CallSettings(BaseModel):
+    script: str = Field(..., min_length=20)
+    max_call_attempts: int = Field(3, ge=1, le=10)
+    call_interval_hours: int = Field(24, ge=1, le=168)
+    preferred_calling_hours: Dict[str, Any] = Field(default={
+        "start": "09:00",
+        "end": "17:00",
+        "timezone": "UTC"
+    })
+    voicemail_script: Optional[str] = None
+    call_recording_enabled: bool = True
+    auto_dial_enabled: bool = False
+    caller_id: Optional[str] = None
+
+class ScheduleSettings(BaseModel):
+    working_days: List[str] = Field(default=["monday", "tuesday", "wednesday", "thursday", "friday"])
+    working_hours_start: time = Field(default=time(9, 0))
+    working_hours_end: time = Field(default=time(17, 0))
+    timezone: str = Field(default="UTC")
+    lunch_break_start: Optional[time] = Field(default=time(12, 0))
+    lunch_break_end: Optional[time] = Field(default=time(13, 0))
+    max_concurrent_calls: int = Field(5, ge=1, le=20)
+    campaign_active_days: List[str] = Field(default=["monday", "tuesday", "wednesday", "thursday", "friday"])
+    pause_on_holidays: bool = True
+
+class CampaignSettings(BaseModel):
+    booking: BookingSettings
+    email: EmailSettings
+    call: CallSettings
+    schedule: ScheduleSettings
+    
+class BookingSettingsUpdate(BaseModel):
+    calendar_type: Optional[str] = None
+    meeting_duration_minutes: Optional[int] = Field(None, ge=15, le=180)
+    buffer_time_minutes: Optional[int] = Field(None, ge=0, le=60)
+    send_invite_to_lead: Optional[bool] = None
+    send_invite_to_team: Optional[bool] = None
+    team_email_addresses: Optional[List[str]] = None
+    booking_window_days: Optional[int] = Field(None, ge=1, le=90)
+    min_notice_hours: Optional[int] = Field(None, ge=1, le=48)
+    max_bookings_per_day: Optional[int] = Field(None, ge=1, le=50)
+
+class EmailSettingsUpdate(BaseModel):
+    template: Optional[str] = Field(None, min_length=10)
+    subject_line: Optional[str] = Field(None, min_length=5, max_length=100)
+    from_name: Optional[str] = Field(None, min_length=2, max_length=50)
+    from_email: Optional[str] = Field(None, pattern=r'^[^@]+@[^@]+\.[^@]+$')
+    enable_followup: Optional[bool] = None
+    followup_delay_hours: Optional[int] = Field(None, ge=1, le=168)
+    max_followup_attempts: Optional[int] = Field(None, ge=1, le=10)
+    unsubscribe_link: Optional[bool] = None
+    track_opens: Optional[bool] = None
+    track_clicks: Optional[bool] = None
+
+class CallSettingsUpdate(BaseModel):
+    script: Optional[str] = Field(None, min_length=20)
+    max_call_attempts: Optional[int] = Field(None, ge=1, le=10)
+    call_interval_hours: Optional[int] = Field(None, ge=1, le=168)
+    preferred_calling_hours: Optional[Dict[str, Any]] = None
+    voicemail_script: Optional[str] = None
+    call_recording_enabled: Optional[bool] = None
+    auto_dial_enabled: Optional[bool] = None
+    caller_id: Optional[str] = None
+
+class ScheduleSettingsUpdate(BaseModel):
+    working_days: Optional[List[str]] = None
+    working_hours_start: Optional[time] = None
+    working_hours_end: Optional[time] = None
+    timezone: Optional[str] = None
+    lunch_break_start: Optional[time] = None
+    lunch_break_end: Optional[time] = None
+    max_concurrent_calls: Optional[int] = Field(None, ge=1, le=20)
+    campaign_active_days: Optional[List[str]] = None
+    pause_on_holidays: Optional[bool] = None
+
+class CalendarConnectRequest(BaseModel):
+    calendar_type: str = Field(..., description="google, outlook, calendly")
+    credentials: Dict[str, Any] = Field(..., description="OAuth tokens or API keys")
+    calendar_name: Optional[str] = Field(None, max_length=255)
+    is_primary: bool = Field(default=True)
+
+class CalendarConnectResponse(BaseModel):
+    calendar_id: str
+    calendar_type: str
+    calendar_name: str
+    is_connected: bool
+    message: str
+
+class TimeSlot(BaseModel):
+    start: str = Field(..., description="ISO 8601 datetime string")
+    end: str = Field(..., description="ISO 8601 datetime string")
+    available: bool = True
+
+class CalendarAvailabilityResponse(BaseModel):
+    calendar_id: str
+    date_range: Dict[str, str]
+    total_slots: int
+    available_slots: List[TimeSlot]
+
+class CalendarTestRequest(BaseModel):
+    calendar_id: str
+
+class CalendarTestResponse(BaseModel):
+    calendar_id: str
+    success: bool
+    message: str
+    last_tested: str
+    connection_details: Optional[Dict[str, Any]] = None
+
+class CalendarIntegration(BaseModel):
+    id: str
+    company_id: str
+    user_id: str
+    calendar_type: str
+    calendar_id: str
+    calendar_name: str
+    credentials: Dict[str, Any]
+    is_active: bool
+    is_primary: bool
+    last_sync: Optional[datetime]
+    created_at: datetime
+    updated_at: datetime
