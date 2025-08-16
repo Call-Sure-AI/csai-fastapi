@@ -1,11 +1,21 @@
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, BackgroundTasks, Query
-from fastapi.responses import StreamingResponse
+from fastapi.responses import StreamingResponse, JSONResponse
 from typing import List, Optional
 import uuid
 import logging
 from datetime import datetime
 
 from app.models.schemas import UserResponse, AgentCreate, LeadCreate, LeadUpdate, Lead, LeadsBulkUpdate
+from app.models.schemas import (
+    UserResponse, CSVParseResponse, CSVValidateRequest, CSVValidateResponse,
+    CSVMapFieldsRequest, CSVMapFieldsResponse
+)
+
+from app.models.schemas import (
+    UserResponse, CampaignSettings, BookingSettingsUpdate, 
+    EmailSettingsUpdate, CallSettingsUpdate, ScheduleSettingsUpdate
+)
+
 from app.models.campaigns import CreateCampaignRequest, CampaignResponse, UpdateCampaignRequest
 from middleware.auth_middleware import get_current_user
 from app.services.campaign_service import CampaignService
@@ -603,3 +613,176 @@ async def export_leads(
         media_type="text/csv",
         headers={"Content-Disposition": f"attachment; filename={campaign_id}_leads.csv"}
     )
+
+async def _ensure_user_authenticated(current_user: UserResponse, company_handler: CompanyHandler):
+    """Helper to ensure user has valid company access"""
+    company = await company_handler.get_company_by_user(current_user.id)
+    if not company:
+        raise HTTPException(400, "User has no company")
+    return company["id"]
+
+@router.post("/csv/parse", response_model=CSVParseResponse)
+async def parse_csv(
+    csv_file: UploadFile = File(None),
+    csv_content: str = Form(None),
+    preview_rows: int = Form(5),
+    current_user: UserResponse = Depends(get_current_user),
+    company_handler: CompanyHandler = Depends(CompanyHandler),
+):
+    await _ensure_user_authenticated(current_user, company_handler)
+    
+    if not csv_file and not csv_content:
+        raise HTTPException(400, "Either csv_file or csv_content must be provided")
+    
+    try:
+        if csv_file:
+            if not csv_file.filename.lower().endswith('.csv'):
+                raise HTTPException(400, "File must be a CSV")
+            content = (await csv_file.read()).decode('utf-8')
+        else:
+            content = csv_content
+        
+        svc = CampaignService()
+        result = await svc.parse_csv_content(content, preview_rows)
+        
+        logger.info(f"CSV parsed successfully: {len(result.headers)} headers, {result.total_rows} rows")
+        return result
+        
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    except Exception as e:
+        logger.error(f"Error parsing CSV: {str(e)}")
+        raise HTTPException(500, f"Failed to parse CSV: {str(e)}")
+
+@router.post("/csv/validate", response_model=CSVValidateResponse)
+async def validate_csv(
+    request: CSVValidateRequest,
+    current_user: UserResponse = Depends(get_current_user),
+    company_handler: CompanyHandler = Depends(CompanyHandler),
+):
+    await _ensure_user_authenticated(current_user, company_handler)
+    
+    try:
+        svc = CampaignService()
+        result = await svc.validate_csv_data(request)
+        
+        logger.info(f"CSV validation completed: {result.summary}")
+        return result
+        
+    except Exception as e:
+        logger.error(f"Error validating CSV: {str(e)}")
+        raise HTTPException(500, f"Failed to validate CSV: {str(e)}")
+
+@router.post("/csv/map-fields", response_model=CSVMapFieldsResponse)
+async def map_csv_fields(
+    request: CSVMapFieldsRequest,
+    current_user: UserResponse = Depends(get_current_user),
+    company_handler: CompanyHandler = Depends(CompanyHandler),
+):
+    await _ensure_user_authenticated(current_user, company_handler)
+    
+    try:
+        svc = CampaignService()
+        result = await svc.map_csv_fields(request)
+        
+        logger.info(f"CSV field mapping completed: {len(result.mapped_fields)} mapped")
+        return result
+        
+    except Exception as e:
+        logger.error(f"Error mapping CSV fields: {str(e)}")
+        raise HTTPException(500, f"Failed to map CSV fields: {str(e)}")
+
+async def _ensure_campaign_access(campaign_id: str, user: UserResponse, ch: CompanyHandler):
+    comp = await ch.get_company_by_user(user.id)
+    if not comp:
+        raise HTTPException(400, "User has no company")
+    svc = CampaignService()
+    if not await svc.get_campaign(campaign_id, comp["id"]):
+        raise HTTPException(404, "Campaign not found")
+    return comp["id"]
+
+@router.get("/{campaign_id}/settings", response_model=CampaignSettings)
+async def get_campaign_settings(
+    campaign_id: str,
+    current_user: UserResponse = Depends(get_current_user),
+    company_handler: CompanyHandler = Depends(CompanyHandler),
+):
+    company_id = await _ensure_campaign_access(campaign_id, current_user, company_handler)
+    
+    svc = CampaignService()
+    settings = await svc.get_campaign_settings(campaign_id, company_id)
+    
+    if not settings:
+        raise HTTPException(404, "Campaign settings not found")
+    
+    return settings
+
+@router.put("/{campaign_id}/settings/booking")
+async def update_booking_settings(
+    campaign_id: str,
+    settings: BookingSettingsUpdate,
+    current_user: UserResponse = Depends(get_current_user),
+    company_handler: CompanyHandler = Depends(CompanyHandler),
+):
+    company_id = await _ensure_campaign_access(campaign_id, current_user, company_handler)
+    
+    svc = CampaignService()
+    updated = await svc.update_booking_settings(campaign_id, company_id, settings)
+    
+    if not updated:
+        raise HTTPException(404, "Failed to update booking settings")
+    
+    return {"message": "Booking settings updated successfully", "settings": updated}
+
+@router.put("/{campaign_id}/settings/email")
+async def update_email_settings(
+    campaign_id: str,
+    settings: EmailSettingsUpdate,
+    current_user: UserResponse = Depends(get_current_user),
+    company_handler: CompanyHandler = Depends(CompanyHandler),
+):
+    company_id = await _ensure_campaign_access(campaign_id, current_user, company_handler)
+    
+    svc = CampaignService()
+    updated = await svc.update_email_settings(campaign_id, company_id, settings)
+    
+    if not updated:
+        raise HTTPException(404, "Failed to update email settings")
+    
+    return {"message": "Email settings updated successfully", "settings": updated}
+
+@router.put("/{campaign_id}/settings/call")
+async def update_call_settings(
+    campaign_id: str,
+    settings: CallSettingsUpdate,
+    current_user: UserResponse = Depends(get_current_user),
+    company_handler: CompanyHandler = Depends(CompanyHandler),
+):
+    """Update call settings for campaign"""
+    company_id = await _ensure_campaign_access(campaign_id, current_user, company_handler)
+    
+    svc = CampaignService()
+    updated = await svc.update_call_settings(campaign_id, company_id, settings)
+    
+    if not updated:
+        raise HTTPException(404, "Failed to update call settings")
+    
+    return {"message": "Call settings updated successfully", "settings": updated}
+
+@router.put("/{campaign_id}/settings/schedule")
+async def update_schedule_settings(
+    campaign_id: str,
+    settings: ScheduleSettingsUpdate,
+    current_user: UserResponse = Depends(get_current_user),
+    company_handler: CompanyHandler = Depends(CompanyHandler),
+):
+    """Update schedule settings for campaign"""
+    company_id = await _ensure_campaign_access(campaign_id, current_user, company_handler)
+    
+    svc = CampaignService()
+    updated = await svc.update_schedule_settings(campaign_id, company_id, settings)
+    
+    if not updated:
+        raise HTTPException(404, "Failed to update schedule settings")
+    
+    return {"message": "Schedule settings updated successfully", "settings": updated}
