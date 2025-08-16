@@ -66,3 +66,19 @@ class CampaignLead(BaseModel):
     last_call_at: Optional[datetime] = None
     status: str = "pending"
     created_at: datetime
+
+class UpdateCampaignRequest(BaseModel):
+    campaign_name: str | None = Field(None, max_length=255)
+    description:   str | None = Field(None, max_length=1000)
+    data_mapping:   List[DataMapping] | None = None
+    booking:        CalendarBooking  | None = None
+    automation:     AutomationSettings | None = None
+    status:        str | None = None
+
+class AgentAssignRequest(BaseModel):
+    agent_ids: List[str] = Field(..., min_items=1)
+
+class AgentSettingsPayload(BaseModel):
+    is_active: bool | None = None
+    max_response_tokens: int | None = Field(None, ge=1)
+    temperature: float | None = Field(None, ge=0, le=2)

@@ -12,7 +12,6 @@ logger = logging.getLogger(__name__)
 
 class AgentHandler:
     def __init__(self):
-        # Don't access the client in __init__, do it lazily
         self._db = None
         
     @property
