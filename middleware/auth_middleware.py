@@ -8,6 +8,8 @@ from app.models.schemas import UserResponse
 import logging
 from config import config
 from fastapi import HTTPException
+from fastapi import WebSocket
+from jose import jwt, JWTError
 
 env = os.getenv('FLASK_ENV', 'development')
 app_config = config.get(env, config['default'])()
@@ -15,6 +17,21 @@ app_config = config.get(env, config['default'])()
 logger = logging.getLogger(__name__)
 security = HTTPBearer()
 
+async def get_current_user_ws(websocket: WebSocket, token: str) -> UserResponse:
+    try:
+        payload = jwt.decode(token, app_config.JWT_SECRET, algorithms=["HS256"])
+        
+        user_id = payload.get("id")
+        email = payload.get("email")
+        
+        if user_id is None or email is None:
+            raise JWTError("Invalid token payload")
+            
+        return UserResponse(id=user_id, email=email)
+        
+    except JWTError as e:
+        await websocket.close(code=1008, reason=f"Authentication failed: {str(e)}")
+        raise
 
 async def get_current_user(
     credentials: HTTPAuthorizationCredentials = Depends(security)
