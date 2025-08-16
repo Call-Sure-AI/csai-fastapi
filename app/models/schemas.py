@@ -920,3 +920,29 @@ class CalendarIntegration(BaseModel):
     last_sync: Optional[datetime]
     created_at: datetime
     updated_at: datetime
+
+class CampaignLiveStatus(BaseModel):
+    campaign_id: str
+    status: str = Field(..., description="active, paused, completed,```ror")
+    current_phase: str = Field(default="idle", description="calling```mailing, analyzing")
+    active_agents: int = Field(default=0, ge=0)
+    queue_size: int = Field(default=0, ge=0)
+    last_activity: Optional[str] = None
+    timestamp: str = Field(default_factory=lambda: datetime.utcnow().isoformat())
+
+class CampaignMetrics(BaseModel):
+    campaign_id: str
+    calls_made: int = Field(default=0, ge=0)
+    calls_answered: int = Field(default=0, ge=0)
+    calls_successful: int = Field(default=0, ge=0)
+    emails_sent: int = Field(default=0, ge=0)
+    emails_opened: int = Field(default=0, ge=0)
+    bookings_scheduled: int = Field(default=0, ge=0)
+    leads_contacted: int = Field(default=0, ge=0)
+    conversion_rate: float = Field(default=0.0, ge=0.0, le=100.0)
+    timestamp: str = Field(default_factory=lambda: datetime.utcnow().isoformat())
+
+class WebSocketMessage(BaseModel):
+    type: str = Field(..., description="status, metrics, error```eartbeat")
+    data: Dict[str, Any]
+    timestamp: str = Field(default_factory=lambda: datetime.utcnow().isoformat())

@@ -1,9 +1,10 @@
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, BackgroundTasks, Query
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, BackgroundTasks, Query, WebSocket, WebSocketDisconnect
 from fastapi.responses import StreamingResponse, JSONResponse
 from typing import List, Optional
 import uuid
 import logging
 from datetime import datetime
+from middleware.auth_middleware import get_current_user_ws
 
 from app.models.schemas import UserResponse, AgentCreate, LeadCreate, LeadUpdate, Lead, LeadsBulkUpdate
 from app.models.schemas import (
@@ -19,6 +20,7 @@ from app.models.schemas import (
 from app.models.campaigns import CreateCampaignRequest, CampaignResponse, UpdateCampaignRequest
 from middleware.auth_middleware import get_current_user
 from app.services.campaign_service import CampaignService
+from app.services.websocket_service import manager, WebSocketService
 import io, csv
 
 from routes.email import send_email_background
@@ -776,7 +778,6 @@ async def update_schedule_settings(
     current_user: UserResponse = Depends(get_current_user),
     company_handler: CompanyHandler = Depends(CompanyHandler),
 ):
-    """Update schedule settings for campaign"""
     company_id = await _ensure_campaign_access(campaign_id, current_user, company_handler)
     
     svc = CampaignService()
@@ -786,3 +787,96 @@ async def update_schedule_settings(
         raise HTTPException(404, "Failed to update schedule settings")
     
     return {"message": "Schedule settings updated successfully", "settings": updated}
+
+async def get_current_user_ws(websocket: WebSocket, token: str = Query(...)):
+    try:
+        from middleware.auth_middleware import verify_token
+        user = await verify_token(token)
+        return user
+    except Exception as e:
+        await websocket.close(code=1008, reason="Authentication failed")
+        raise
+
+@router.websocket("/{campaign_id}/live")
+async def websocket_live_status(
+    websocket: WebSocket,
+    campaign_id: str,
+    token: str = Query(..., description="JWT authentication token"),
+):
+    try:
+        current_user = await get_current_user_ws(websocket, token)
+
+        company_handler = CompanyHandler()
+        company = await company_handler.get_company_by_user(current_user.id)
+        if not company:
+            await websocket.close(code=1008, reason="User has no company")
+            return
+
+        ws_service = WebSocketService()
+        await manager.connect_live(websocket, campaign_id)
+
+        await ws_service.start_live_updates(campaign_id, company["id"])
+
+        status = await ws_service.get_live_status(campaign_id, company["id"])
+        await manager.broadcast_live_status(campaign_id, status)
+
+        while True:
+            try:
+                message = await websocket.receive_json()
+                if message.get("type") == "heartbeat":
+                    await websocket.send_json({"type": "heartbeat_ack", "timestamp": datetime.utcnow().isoformat()})
+            except WebSocketDisconnect:
+                break
+            except Exception as e:
+                logger.error(f"WebSocket error: {e}")
+                break
+                
+    except WebSocketDisconnect:
+        pass
+    except Exception as e:
+        logger.error(f"WebSocket live status error: {e}")
+        await websocket.close(code=1011, reason="Internal server error")
+    finally:
+        await manager.disconnect_live(websocket, campaign_id)
+
+@router.websocket("/{campaign_id}/metrics")
+async def websocket_metrics(
+    websocket: WebSocket,
+    campaign_id: str,
+    token: str = Query(..., description="JWT authentication token"),
+):
+    try:
+        current_user = await get_current_user_ws(websocket, token)
+
+        company_handler = CompanyHandler()
+        company = await company_handler.get_company_by_user(current_user.id)
+        if not company:
+            await websocket.close(code=1008, reason="User has no company")
+            return
+
+        ws_service = WebSocketService()
+        await manager.connect_metrics(websocket, campaign_id)
+
+        await ws_service.start_metrics_updates(campaign_id, company["id"])
+
+        metrics = await ws_service.get_current_metrics(campaign_id, company["id"])
+        await manager.broadcast_metrics(campaign_id, metrics)
+
+        while True:
+            try:
+                message = await websocket.receive_json()
+                if message.get("type") == "heartbeat":
+                    await websocket.send_json({"type": "heartbeat_ack", "timestamp": datetime.utcnow().isoformat()})
+            except WebSocketDisconnect:
+                break
+            except Exception as e:
+                logger.error(f"WebSocket error: {e}")
+                break
+                
+    except WebSocketDisconnect:
+        pass
+    except Exception as e:
+        logger.error(f"WebSocket metrics error: {e}")
+        await websocket.close(code=1011, reason="Internal server error")
+    finally:
+        await manager.disconnect_metrics(websocket, campaign_id)
