@@ -1,6 +1,7 @@
 from fastapi import Depends, HTTPException, status, Request, Header
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials, OAuth2PasswordBearer
 import jwt
+from jwt import InvalidTokenError, ExpiredSignatureError
 import os
 from typing import Optional
 from app.db.postgres_client import postgres_client
@@ -9,7 +10,6 @@ import logging
 from config import config
 from fastapi import HTTPException
 from fastapi import WebSocket
-from jose import jwt, JWTError
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/login")
 
@@ -27,11 +27,11 @@ async def get_current_user_ws(websocket: WebSocket, token: str) -> UserResponse:
         email = payload.get("email")
         
         if user_id is None or email is None:
-            raise JWTError("Invalid token payload")
+            raise InvalidTokenError("Invalid token payload")
             
         return UserResponse(id=user_id, email=email)
         
-    except JWTError as e:
+    except InvalidTokenError as e:
         await websocket.close(code=1008, reason=f"Authentication failed: {str(e)}")
         raise
 
@@ -74,12 +74,12 @@ async def get_current_user(
             role=role
         )
         
-    except jwt.ExpiredSignatureError:
+    except ExpiredSignatureError:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Token has expired"
         )
-    except jwt.InvalidTokenError:
+    except InvalidTokenError:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Could not validate credentials"
@@ -135,9 +135,9 @@ async def verify_token(credentials: HTTPAuthorizationCredentials = Depends(secur
         token = credentials.credentials
         payload = jwt.decode(token, app_config.JWT_SECRET, algorithms=["HS256"])  # Use config
         return payload
-    except jwt.ExpiredSignatureError:
+    except ExpiredSignatureError:
         raise HTTPException(status_code=401, detail="Token expired")
-    except jwt.InvalidTokenError:
+    except InvalidTokenError:
         raise HTTPException(status_code=401, detail="Invalid token")
 
 
@@ -145,7 +145,7 @@ async def verify_websocket_token(token: str) -> dict:
     try:
         payload = jwt.decode(token, app_config.JWT_SECRET, algorithms=["HS256"])  # Use config
         return payload
-    except jwt.ExpiredSignatureError:
+    except ExpiredSignatureError:
         raise HTTPException(status_code=401, detail="Token expired")
-    except jwt.InvalidTokenError:
+    except InvalidTokenError:
         raise HTTPException(status_code=401, detail="Invalid token")
