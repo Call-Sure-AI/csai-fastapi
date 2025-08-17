@@ -1,5 +1,5 @@
 from fastapi import Depends, HTTPException, status, Request, Header
-from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials, OAuth2PasswordBearer
 import jwt
 import os
 from typing import Optional
@@ -10,6 +10,8 @@ from config import config
 from fastapi import HTTPException
 from fastapi import WebSocket
 from jose import jwt, JWTError
+
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/login")
 
 env = os.getenv('FLASK_ENV', 'development')
 app_config = config.get(env, config['default'])()

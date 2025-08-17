@@ -13,6 +13,7 @@ from .analytics import router as analytics_router
 from .conversation import router as conversation_router
 from .campaigns import router as campaign_router
 from .integrations import router as integration_router
+from .bookings import router as booking_router
 
 # Create the main API router
 api_router = APIRouter()
@@ -33,6 +34,7 @@ api_router.include_router(analytics_router, tags=["Analytics"])
 api_router.include_router(conversation_router, tags=["Conversation"])
 api_router.include_router(campaign_router, tags=["Campaign"])
 api_router.include_router(integration_router, tags=["Integration"])
+api_router.include_router(booking_router, tags=["Booking"])
 
 # You can also create versioned API routers
 v1_router = APIRouter()
@@ -50,5 +52,6 @@ v1_router.include_router(analytics_router, tags=["Analytics"])
 v1_router.include_router(conversation_router, tags=["Conversation"])
 v1_router.include_router(campaign_router, tags=["Campaign"])
 v1_router.include_router(integration_router, tags=["Integration"])
+v1_router.include_router(booking_router, tags=["Booking"])
 
 __all__ = ["api_router", "v1_router"]
