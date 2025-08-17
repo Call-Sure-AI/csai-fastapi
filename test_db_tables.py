@@ -2,27 +2,28 @@ import asyncio
 from app.db.postgres_client import get_db_connection
 
 SQL_CALENDAR_INTEGRATIONS = """
-CREATE TABLE IF NOT EXISTS email_templates (
+DROP TABLE IF EXISTS booking CASCADE;
+
+CREATE TABLE booking (
     id VARCHAR(255) PRIMARY KEY,
-    company_id VARCHAR(255) NOT NULL,
-    created_by VARCHAR(255) NOT NULL,
-    name VARCHAR(255) NOT NULL,
-    subject VARCHAR(500) NOT NULL,
-    body TEXT NOT NULL,
-    template_type VARCHAR(50) DEFAULT 'campaign',
-    variables JSONB DEFAULT '[]'::jsonb,
-    is_default BOOLEAN DEFAULT FALSE,
-    is_active BOOLEAN DEFAULT TRUE,
+    campaign_id VARCHAR(255) NOT NULL,
+    customer VARCHAR(255) NOT NULL,
+    slot_start TIMESTAMP NOT NULL,
+    slot_end TIMESTAMP NOT NULL,
+    status VARCHAR(50) NOT NULL DEFAULT 'pending',
+    customer_email VARCHAR(255),
+    customer_phone VARCHAR(50),
+    notes TEXT,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    UNIQUE(company_id, name)
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
+
 """
 
 SQL_INDEXES = """
-CREATE INDEX IF NOT EXISTS idx_email_templates_company ON email_templates(company_id);
-CREATE INDEX IF NOT EXISTS idx_email_templates_type ON email_templates(template_type);
-CREATE INDEX IF NOT EXISTS idx_email_templates_default ON email_templates(is_default) WHERE is_default = TRUE;
+CREATE INDEX IF NOT EXISTS idx_booking_campaign ON booking(campaign_id);
+CREATE INDEX IF NOT EXISTS idx_booking_status ON booking(status);
+CREATE INDEX IF NOT EXISTS idx_booking_slot_times ON booking(slot_start, slot_end);
 """
 
 async def create_calendar_tables() -> None:

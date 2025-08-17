@@ -1,7 +1,7 @@
 import uuid
 from pydantic import BaseModel, Field, EmailStr, HttpUrl, field_validator, validator
 from typing import Optional, Dict, List, Any, Literal
-from datetime import datetime, time
+from datetime import datetime, time, date
 import re
 from enum import Enum
 
@@ -946,3 +946,101 @@ class WebSocketMessage(BaseModel):
     type: str = Field(..., description="status, metrics, error```eartbeat")
     data: Dict[str, Any]
     timestamp: str = Field(default_factory=lambda: datetime.utcnow().isoformat())
+
+class BookingBase(BaseModel):
+    campaign_id: str = Field(..., description="Campaign ID this booking belongs to")
+    customer: str = Field(..., min_length=1, max_length=255)
+    slot_start: datetime = Field(..., description="Booking start time")
+    slot_end: datetime = Field(..., description="Booking end time")
+    status: str = Field(default="pending", description="pending, confirmed, cancelled, rescheduled, completed")
+    customer_email: Optional[str] = Field(None, max_length=255)
+    customer_phone: Optional[str] = Field(None, max_length=50)
+    notes: Optional[str] = Field(None, max_length=1000)
+
+class BookingCreate(BookingBase):
+    pass
+
+class BookingUpdate(BaseModel):
+    campaign_id: Optional[str] = None
+    customer: Optional[str] = Field(None, min_length=1, max_length=255)
+    slot_start: Optional[datetime] = None
+    slot_end: Optional[datetime] = None
+    status: Optional[str] = None
+    customer_email: Optional[str] = Field(None, max_length=255)
+    customer_phone: Optional[str] = Field(None, max_length=50)
+    notes: Optional[str] = Field(None, max_length=1000)
+
+class BookingResponse(BookingBase):
+    id: str
+    created_at: datetime
+    updated_at: datetime
+    
+    class Config:
+        from_attributes = True
+
+class BookingStatusUpdate(BaseModel):
+    status: str = Field(..., description="New status for the booking")
+
+class BookingBulkUpdate(BaseModel):
+    booking_ids: List[str] = Field(..., min_items=1)
+    updates: BookingUpdate
+
+class BookingFilter(BaseModel):
+    campaign_id: Optional[str] = None
+    customer: Optional[str] = None
+    status: Optional[str] = None
+    start_date: Optional[datetime] = None
+    end_date: Optional[datetime] = None
+
+class BookingAnalytics(BaseModel):
+    total_bookings: int = Field(ge=0)
+    completed: int = Field(ge=0)
+    cancelled: int = Field(ge=0) 
+    pending: int = Field(ge=0)
+    rescheduled: int = Field(ge=0)
+    completion_rate: float = Field(ge=0.0, le=1.0)
+    cancellation_rate: float = Field(ge=0.0, le=1.0)
+    average_booking_duration: int = Field(description="Average duration in minutes")
+    revenue_generated: float = Field(ge=0.0)
+    period_start: date
+    period_end: date
+
+class AIPerformanceMetrics(BaseModel):
+    call_success_rate: float = Field(ge=0.0, le=1.0, description="Percentage of successful calls")
+    average_handle_time: int = Field(ge=0, description="Average call duration in seconds")
+    auto_dialer_efficiency: float = Field(ge=0.0, le=1.0)
+    voice_quality_score: float = Field(ge=0.0, le=10.0)
+    response_accuracy: float = Field(ge=0.0, le=1.0)
+    total_calls_handled: int = Field(ge=0)
+    ai_uptime: float = Field(ge=0.0, le=1.0, description="AI system uptime percentage")
+    cost_per_call: float = Field(ge=0.0)
+
+class CallInsights(BaseModel):
+    peak_hours: List[str] = Field(description="Best performing hours")
+    avg_calls_per_hour: float = Field(ge=0.0)
+    best_days: List[str] = Field(description="Most successful days of week")
+    call_patterns: Dict[str, int] = Field(description="Call volume by time periods")
+    answer_rates: Dict[str, float] = Field(description="Answer rates by time/```")
+    conversion_by_hour: Dict[str, float]
+    total_call_volume: int = Field(ge=0)
+    
+class ConversionFunnel(BaseModel):
+    leads_imported: int = Field(ge=0)
+    leads_contacted: int = Field(ge=0) 
+    leads_answered: int = Field(ge=0)
+    bookings_scheduled: int = Field(ge=0)
+    bookings_completed: int = Field(ge=0)
+    final_conversions: int = Field(ge=0)
+    contact_rate: float = Field(ge=0.0, le=1.0)
+    answer_rate: float = Field(ge=0.0, le=1.0)
+    booking_rate: float = Field(ge=0.0, le=1.0)
+    completion_rate: float = Field(ge=0.0, le=1.0)
+    overall_conversion_rate: float = Field(ge=0.0, le=1.0)
+
+class OptimalTimes(BaseModel):
+    best_call_times: List[Dict[str, Any]] = Field(description="Optimal time periods for calls")
+    worst_call_times: List[Dict[str, Any]] = Field(description="Poor performing time periods")
+    day_performance: Dict[str, float] = Field(description="Success rate by day of week")
+    hour_performance: Dict[str, float] = Field(description="Success rate by hour")
+    recommendations: List[str] = Field(description="AI-generated recommendations")
+    timezone: str = Field(default="UTC")
