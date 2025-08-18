@@ -2,37 +2,35 @@ import asyncio
 from app.db.postgres_client import get_db_connection
 
 SQL_CALENDAR_INTEGRATIONS = """
-DROP TABLE IF EXISTS booking CASCADE;
-
-CREATE TABLE booking (
+CREATE TABLE IF NOT EXISTS notification_logs (
     id VARCHAR(255) PRIMARY KEY,
-    campaign_id VARCHAR(255) NOT NULL,
-    customer VARCHAR(255) NOT NULL,
-    slot_start TIMESTAMP NOT NULL,
-    slot_end TIMESTAMP NOT NULL,
-    status VARCHAR(50) NOT NULL DEFAULT 'pending',
-    customer_email VARCHAR(255),
-    customer_phone VARCHAR(50),
-    notes TEXT,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    company_id VARCHAR(255) NOT NULL,
+    user_id VARCHAR(255) NOT NULL,
+    notification_type VARCHAR(100) NOT NULL, -- booking_confirmation, meeting_reminder, cancellation_notice
+    recipient_email VARCHAR(255) NOT NULL,
+    booking_id VARCHAR(255),
+    metadata JSONB DEFAULT '{}',
+    sent_at TIMESTAMP NOT NULL,
+    delivery_status VARCHAR(50) DEFAULT 'sent', -- sent, delivered, failed, bounced
+    created_at TIMESTAMP DEFAULT NOW(),
+    updated_at TIMESTAMP DEFAULT NOW()
 );
-
 """
 
 SQL_INDEXES = """
-CREATE INDEX IF NOT EXISTS idx_booking_campaign ON booking(campaign_id);
-CREATE INDEX IF NOT EXISTS idx_booking_status ON booking(status);
-CREATE INDEX IF NOT EXISTS idx_booking_slot_times ON booking(slot_start, slot_end);
+CREATE INDEX IF NOT EXISTS idx_notification_logs_company_id ON notification_logs(company_id);
+CREATE INDEX IF NOT EXISTS idx_notification_logs_booking_id ON notification_logs(booking_id);
+CREATE INDEX IF NOT EXISTS idx_notification_logs_type ON notification_logs(notification_type);
+CREATE INDEX IF NOT EXISTS idx_notification_logs_sent_at ON notification_logs(sent_at);
 """
 
 async def create_calendar_tables() -> None:
     async with await get_db_connection() as conn:
         await conn.execute(SQL_CALENDAR_INTEGRATIONS)
-        print("✅ calendar_integrations table created")
+        print("✅ Call_Status table created")
         
-        await conn.execute(SQL_INDEXES)
-        print("✅ Calendar indexes created")
+        #await conn.execute(SQL_INDEXES)
+        #print("✅ Calendar indexes created")
     
     print("\n🎉 Calendar integration tables created successfully!")
 
