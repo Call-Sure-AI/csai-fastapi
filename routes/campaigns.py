@@ -6,6 +6,7 @@ import logging
 from datetime import datetime
 from middleware.auth_middleware import get_current_user_ws
 
+from app.models.schemas import CallInitiateRequest, CallStatusResponse
 from app.models.schemas import UserResponse, AgentCreate, LeadCreate, LeadUpdate, Lead, LeadsBulkUpdate
 from app.models.schemas import (
     UserResponse, CSVParseResponse, CSVValidateRequest, CSVValidateResponse,
@@ -880,3 +881,169 @@ async def websocket_metrics(
         await websocket.close(code=1011, reason="Internal server error")
     finally:
         await manager.disconnect_metrics(websocket, campaign_id)
+
+@router.post("/{campaign_id}/leads/call", status_code=202)
+async def initiate_ai_calls(
+    campaign_id: str,
+    call_request: CallInitiateRequest,
+    background_tasks: BackgroundTasks,
+    current_user: UserResponse = Depends(get_current_user),
+    company_handler: CompanyHandler = Depends(CompanyHandler),
+):
+    """Initiate AI calls for campaign leads"""
+    try:
+        company_id = await _ensure_campaign_access(campaign_id, current_user, company_handler)
+        
+        # Validate campaign exists and is callable
+        campaign = await svc.get_campaign(campaign_id, company_id)
+        if not campaign:
+            raise HTTPException(404, "Campaign not found")
+            
+        if campaign.status not in ["active", "paused"]:
+            raise HTTPException(400, f"Campaign must be active or paused to initiate calls, current status: {campaign.status}")
+        
+        # Get leads to call
+        leads_count = await svc.get_callable_leads_count(campaign_id, call_request.lead_filters)
+        
+        if leads_count == 0:
+            raise HTTPException(400, "No callable leads found for this campaign")
+        
+        # Start calling process in background
+        background_tasks.add_task(
+            _process_ai_calls,
+            campaign_id,
+            company_id,
+            call_request,
+            current_user.id
+        )
+        
+        return {
+            "message": f"AI calling initiated for {leads_count} leads",
+            "campaign_id": campaign_id,
+            "leads_count": leads_count,
+            "status": "initiated"
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error initiating AI calls for campaign {campaign_id}: {e}")
+        raise HTTPException(500, f"Failed to initiate AI calls: {str(e)}")
+
+@router.get("/{campaign_id}/call-status", response_model=CallStatusResponse)
+async def get_calling_status(
+    campaign_id: str,
+    current_user: UserResponse = Depends(get_current_user),
+    company_handler: CompanyHandler = Depends(CompanyHandler),
+):
+    """Get current calling status for campaign"""
+    try:
+        company_id = await _ensure_campaign_access(campaign_id, current_user, company_handler)
+        
+        # Get calling status from service
+        status = await svc.get_calling_status(campaign_id, company_id)
+        
+        if not status:
+            # Return default status if no active calling
+            return CallStatusResponse(
+                campaign_id=campaign_id,
+                calling_active=False,
+                total_leads=await svc.get_leads_count(campaign_id),
+                called_leads=await svc.get_called_leads_count(campaign_id),
+                successful_calls=0,
+                failed_calls=0,
+                active_calls=0,
+                queue_size=0,
+                estimated_completion=None,
+                last_call_at=None
+            )
+        
+        return status
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting call status for campaign {campaign_id}: {e}")
+        raise HTTPException(500, f"Failed to get call status: {str(e)}")
+
+# Background task for processing AI calls
+async def _process_ai_calls(
+    campaign_id: str,
+    company_id: str,
+    call_request: CallInitiateRequest,
+    user_id: str
+):
+    """Background task to process AI calls"""
+    try:
+        logger.info(f"Starting AI calls for campaign {campaign_id}")
+        
+        # Update calling status to active
+        await svc.set_calling_status(campaign_id, company_id, "active")
+        
+        # Get leads to call based on filters
+        leads = await svc.get_callable_leads(campaign_id, call_request.lead_filters)
+        
+        total_leads = len(leads)
+        successful_calls = 0
+        failed_calls = 0
+        
+        for i, lead in enumerate(leads):
+            try:
+                # Check if calling should continue (campaign might be paused/stopped)
+                campaign = await svc.get_campaign(campaign_id, company_id)
+                if campaign.status not in ["active"]:
+                    logger.info(f"Stopping calls for campaign {campaign_id}, status: {campaign.status}")
+                    break
+                
+                # Update progress
+                await svc.update_calling_progress(
+                    campaign_id, 
+                    current_lead=i + 1,
+                    total_leads=total_leads,
+                    successful_calls=successful_calls,
+                    failed_calls=failed_calls,
+                    progress_percentage=((i + 1) / total_leads) * 100
+                )
+                
+                # Initiate call for lead
+                call_result = await svc.initiate_lead_call(
+                    campaign_id=campaign_id,
+                    lead_id=lead["id"],
+                    call_settings=call_request.call_settings,
+                    user_id=user_id
+                )
+                
+                if call_result.get("success"):
+                    successful_calls += 1
+                    logger.info(f"Call successful for lead {lead['id']}")
+                else:
+                    failed_calls += 1
+                    logger.warning(f"Call failed for lead {lead['id']}: {call_result.get('error')}")
+                
+                # Rate limiting - wait between calls if specified
+                if call_request.rate_limit_seconds:
+                    await asyncio.sleep(call_request.rate_limit_seconds)
+                    
+            except Exception as e:
+                failed_calls += 1
+                logger.error(f"Error calling lead {lead.get('id', 'unknown')}: {e}")
+                continue
+        
+        # Update final status
+        await svc.set_calling_status(campaign_id, company_id, "completed")
+        await svc.update_calling_progress(
+            campaign_id,
+            current_lead=total_leads,
+            total_leads=total_leads,
+            successful_calls=successful_calls,
+            failed_calls=failed_calls,
+            completed=True,
+            progress_percentage=100.0
+        )
+        
+        logger.info(f"AI calling completed for campaign {campaign_id}: {successful_calls}/{total_leads} successful")
+        
+    except Exception as e:
+        logger.error(f"Error in AI calling background task for campaign {campaign_id}: {e}")
+        # Mark calling as failed
+        await svc.set_calling_status(campaign_id, company_id, "failed")

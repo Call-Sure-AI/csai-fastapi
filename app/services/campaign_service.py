@@ -16,6 +16,7 @@ from app.models.schemas import (
     CampaignSettings, BookingSettings, EmailSettings, CallSettings, ScheduleSettings,
     BookingSettingsUpdate, EmailSettingsUpdate, CallSettingsUpdate, ScheduleSettingsUpdate
 )
+from app.models.schemas import CallInitiateRequest, CallStatusResponse
 from datetime import datetime, date
 from app.models.schemas import AgentUpdate
 import logging
@@ -873,3 +874,183 @@ class CampaignService:
         }
         defaults.update(data)
         return defaults
+
+    async def get_callable_leads_count(self, campaign_id: str, filters: Dict[str, Any] = None) -> int:
+        """Get count of leads that can be called"""
+        async with (await get_db_connection()) as conn:
+            query = """
+                SELECT COUNT(*) as count
+                FROM leads
+                WHERE campaign_id = $1 
+                AND status IN ('new', 'callback_requested', 'no_answer')
+                AND call_attempts < 3
+                AND phone IS NOT NULL
+            """
+            params = [campaign_id]
+            
+            # Add additional filters if provided
+            if filters:
+                if filters.get("max_call_attempts"):
+                    query += " AND call_attempts <= $2"
+                    params.append(filters["max_call_attempts"])
+            
+            result = await conn.fetchrow(query, *params)
+            return result["count"] if result else 0
+
+    async def get_callable_leads(self, campaign_id: str, filters: Dict[str, Any] = None) -> List[Dict]:
+        """Get leads that can be called"""
+        async with (await get_db_connection()) as conn:
+            query = """
+                SELECT id, first_name, last_name, email, phone, company, status, call_attempts
+                FROM leads
+                WHERE campaign_id = $1 
+                AND status IN ('new', 'callback_requested', 'no_answer')
+                AND call_attempts < 3
+                AND phone IS NOT NULL
+                ORDER BY created_at ASC
+            """
+            params = [campaign_id]
+            
+            if filters and filters.get("limit"):
+                query += f" LIMIT ${len(params) + 1}"
+                params.append(filters["limit"])
+            
+            results = await conn.fetch(query, *params)
+            return [dict(row) for row in results]
+
+    async def get_calling_status(self, campaign_id: str, company_id: str) -> Optional[CallStatusResponse]:
+        """Get current calling status for campaign"""
+        async with (await get_db_connection()) as conn:
+            # Check for active calling session
+            status_query = """
+                SELECT * FROM campaign_call_status 
+                WHERE campaign_id = $1 AND company_id = $2
+            """
+            status_result = await conn.fetchrow(status_query, campaign_id, company_id)
+            
+            if not status_result:
+                return None
+            
+            # Get lead counts
+            leads_query = """
+                SELECT 
+                    COUNT(*) as total_leads,
+                    COUNT(CASE WHEN call_attempts > 0 THEN 1 END) as called_leads,
+                    COUNT(CASE WHEN status = 'completed' THEN 1 END) as successful_calls,
+                    COUNT(CASE WHEN status = 'failed' THEN 1 END) as failed_calls
+                FROM leads
+                WHERE campaign_id = $1
+            """
+            leads_result = await conn.fetchrow(leads_query, campaign_id)
+            
+            return CallStatusResponse(
+                campaign_id=campaign_id,
+                calling_active=status_result["status"] == "active",
+                total_leads=leads_result["total_leads"] if leads_result else 0,
+                called_leads=leads_result["called_leads"] if leads_result else 0,
+                successful_calls=leads_result["successful_calls"] if leads_result else 0,
+                failed_calls=leads_result["failed_calls"] if leads_result else 0,
+                active_calls=status_result.get("active_calls", 0),
+                queue_size=status_result.get("queue_size", 0),
+                estimated_completion=status_result.get("estimated_completion"),
+                last_call_at=status_result.get("last_call_at"),
+                progress_percentage=status_result.get("progress_percentage", 0),
+                current_lead_position=status_result.get("current_lead_position", 0)
+            )
+
+    async def set_calling_status(self, campaign_id: str, company_id: str, status: str):
+        """Set calling status for campaign"""
+        async with (await get_db_connection()) as conn:
+            await conn.execute("""
+                INSERT INTO campaign_call_status (campaign_id, company_id, status, updated_at)
+                VALUES ($1, $2, $3, NOW())
+                ON CONFLICT (campaign_id, company_id)
+                DO UPDATE SET status = $3, updated_at = NOW()
+            """, campaign_id, company_id, status)
+
+    async def update_calling_progress(self, campaign_id: str, **kwargs):
+        """Update calling progress"""
+        async with (await get_db_connection()) as conn:
+            set_clauses = []
+            params = []
+            param_idx = 1
+            
+            for key, value in kwargs.items():
+                if key in ['current_lead', 'total_leads', 'successful_calls', 'failed_calls', 'progress_percentage', 'completed']:
+                    if key == 'current_lead':
+                        set_clauses.append(f"current_lead_position = ${param_idx}")
+                    elif key == 'completed' and value:
+                        set_clauses.append(f"status = 'completed'")
+                        continue
+                    else:
+                        set_clauses.append(f"{key} = ${param_idx}")
+                    params.append(value)
+                    param_idx += 1
+            
+            if set_clauses:
+                query = f"""
+                    UPDATE campaign_call_status 
+                    SET {', '.join(set_clauses)}, updated_at = NOW()
+                    WHERE campaign_id = ${param_idx}
+                """
+                params.append(campaign_id)
+                await conn.execute(query, *params)
+
+    async def initiate_lead_call(self, campaign_id: str, lead_id: str, call_settings: Dict, user_id: str) -> Dict:
+        """Initiate AI call for a specific lead"""
+        async with (await get_db_connection()) as conn:
+            try:
+                # Update lead call attempt
+                await conn.execute("""
+                    UPDATE leads 
+                    SET call_attempts = call_attempts + 1,
+                        last_called_at = NOW(),
+                        updated_at = NOW()
+                    WHERE id = $1 AND campaign_id = $2
+                """, lead_id, campaign_id)
+                
+                # Mock call result - replace with actual AI calling logic
+                import random
+                success = random.choice([True, True, False])  # 66% success rate for demo
+                
+                if success:
+                    # Update lead status on successful call
+                    await conn.execute("""
+                        UPDATE leads 
+                        SET status = 'contacted'
+                        WHERE id = $1 AND campaign_id = $2
+                    """, lead_id, campaign_id)
+                
+                return {
+                    "success": success,
+                    "lead_id": lead_id,
+                    "call_id": f"call_{uuid.uuid4().hex[:8]}",
+                    "error": None if success else "Lead unavailable"
+                }
+                
+            except Exception as e:
+                logger.error(f"Error initiating call for lead {lead_id}: {e}")
+                return {
+                    "success": False,
+                    "lead_id": lead_id,
+                    "call_id": None,
+                    "error": str(e)
+                }
+
+    async def get_leads_count(self, campaign_id: str) -> int:
+        """Get total leads count for campaign"""
+        async with (await get_db_connection()) as conn:
+            result = await conn.fetchrow(
+                "SELECT COUNT(*) as count FROM leads WHERE campaign_id = $1", 
+                campaign_id
+            )
+            return result["count"] if result else 0
+
+    async def get_called_leads_count(self, campaign_id: str) -> int:
+        """Get called leads count for campaign"""
+        async with (await get_db_connection()) as conn:
+            result = await conn.fetchrow(
+                "SELECT COUNT(*) as count FROM leads WHERE campaign_id = $1 AND call_attempts > 0", 
+                campaign_id
+            )
+            return result["count"] if result else 0

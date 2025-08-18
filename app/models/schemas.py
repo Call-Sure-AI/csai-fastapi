@@ -1044,3 +1044,162 @@ class OptimalTimes(BaseModel):
     hour_performance: Dict[str, float] = Field(description="Success rate by hour")
     recommendations: List[str] = Field(description="AI-generated recommendations")
     timezone: str = Field(default="UTC")
+
+class CallInitiateRequest(BaseModel):
+    lead_filters: Optional[Dict[str, Any]] = Field(
+        default={},
+        description="Filters to select which leads to call (e.g., status, call_attempts)"
+    )
+    call_settings: Optional[Dict[str, Any]] = Field(
+        default={},
+        description="Call settings like script, voice, etc."
+    )
+    rate_limit_seconds: Optional[int] = Field(
+        default=5,
+        ge=1,
+        le=60,
+        description="Seconds to wait between calls"
+    )
+    max_concurrent_calls: Optional[int] = Field(
+        default=3,
+        ge=1,
+        le=10,
+        description="Maximum concurrent calls"
+    )
+
+class CallStatusResponse(BaseModel):
+    campaign_id: str
+    calling_active: bool
+    total_leads: int
+    called_leads: int
+    successful_calls: int
+    failed_calls: int
+    active_calls: int
+    queue_size: int
+    estimated_completion: Optional[datetime]
+    last_call_at: Optional[datetime]
+    progress_percentage: Optional[float] = Field(default=0)
+    current_lead_position: Optional[int] = Field(default=0)
+
+class ConflictCheckRequest(BaseModel):
+    start_time: datetime = Field(..., description="Event start time")
+    end_time: datetime = Field(..., description="Event end time")
+    calendar_id: Optional[str] = Field(None, description="Calendar ID to check")
+
+class ConflictCheckResponse(BaseModel):
+    has_conflicts: bool
+    conflicts: List[Dict[str, Any]] = Field(default_factory=list)
+    suggested_times: List[TimeSlot] = Field(default_factory=list)
+
+class BlockTimeRequest(BaseModel):
+    start_time: datetime = Field(..., description="Block start time")
+    end_time: datetime = Field(..., description="Block end time")
+    title: str = Field("Blocked Time", max_length=255)
+    description: Optional[str] = Field(None, max_length=500)
+    calendar_id: Optional[str] = Field(None, description="Calendar ID")
+
+class BlockTimeResponse(BaseModel):
+    success: bool
+    block_id: str
+    message: str
+
+class CreateEventRequest(BaseModel):
+    title: str = Field(..., min_length=1, max_length=255)
+    description: Optional[str] = Field(None, max_length=1000)
+    start_time: datetime = Field(..., description="Event start time")
+    end_time: datetime = Field(..., description="Event end time")
+    attendees: List[str] = Field(default_factory=list, description="List of email addresses")
+    calendar_id: Optional[str] = Field(None, description="Calendar ID")
+    location: Optional[str] = Field(None, max_length=255)
+    meeting_url: Optional[str] = Field(None, description="Virtual meeting URL")
+
+class CreateEventResponse(BaseModel):
+    success: bool
+    event_id: str
+    message: str
+    meeting_link: Optional[str] = None
+
+class RescheduleEventRequest(BaseModel):
+    event_id: str = Field(..., description="Event ID to reschedule")
+    new_start_time: datetime = Field(..., description="New start time")
+    new_end_time: datetime = Field(..., description="New end time")
+    notify_attendees: bool = Field(True, description="Send notifications to attendees")
+    message: Optional[str] = Field(None, description="Reschedule message")
+
+class RescheduleEventResponse(BaseModel):
+    success: bool
+    event_id: str
+    message: str
+
+class CancelEventRequest(BaseModel):
+    event_id: str = Field(..., description="Event ID to cancel")
+    reason: Optional[str] = Field(None, max_length=500)
+    notify_attendees: bool = Field(True, description="Send notifications to attendees")
+
+class CancelEventResponse(BaseModel):
+    success: bool
+    event_id: str
+    message: str
+
+class SyncCalendarRequest(BaseModel):
+    calendar_type: str = Field(..., description="google or outlook")
+    full_sync: bool = Field(False, description="Perform full sync or incremental")
+    date_range_days: int = Field(30, ge=1, le=365, description="Days to sync")
+
+class SyncCalendarResponse(BaseModel):
+    success: bool
+    calendar_type: str
+    events_synced: int
+    last_sync: datetime
+    message: str
+
+class SyncStatusResponse(BaseModel):
+    google_calendar: Dict[str, Any] = Field(default_factory=dict)
+    outlook_calendar: Dict[str, Any] = Field(default_factory=dict)
+    last_full_sync: Optional[datetime] = None
+    sync_in_progress: bool = False
+
+class BookingConfirmationRequest(BaseModel):
+    booking_id: str = Field(..., description="Booking ID")
+    customer_name: str = Field(..., min_length=1, max_length=255)
+    customer_email: EmailStr = Field(..., description="Customer email address")
+    meeting_title: str = Field(..., min_length=1, max_length=255)
+    meeting_date: datetime = Field(..., description="Meeting date and time")
+    meeting_duration_minutes: int = Field(..., ge=15, le=480)
+    meeting_location: Optional[str] = Field(None, max_length=500)
+    meeting_url: Optional[str] = Field(None, description="Virtual meeting URL")
+    host_name: str = Field(..., min_length=1, max_length=255)
+    host_email: EmailStr = Field(..., description="Host email address")
+    additional_notes: Optional[str] = Field(None, max_length=1000)
+    company_name: Optional[str] = Field(None, max_length=255)
+
+class MeetingReminderRequest(BaseModel):
+    booking_id: str = Field(..., description="Booking ID")
+    customer_name: str = Field(..., min_length=1, max_length=255)
+    customer_email: EmailStr = Field(..., description="Customer email address")
+    meeting_title: str = Field(..., min_length=1, max_length=255)
+    meeting_date: datetime = Field(..., description="Meeting date and time")
+    meeting_duration_minutes: int = Field(..., ge=15, le=480)
+    meeting_location: Optional[str] = Field(None, max_length=500)
+    meeting_url: Optional[str] = Field(None, description="Virtual meeting URL")
+    host_name: str = Field(..., min_length=1, max_length=255)
+    reminder_type: str = Field(default="24h", description="24h, 1h, 15m")
+    time_until_meeting: str = Field(..., description="Human readable time until meeting")
+    company_name: Optional[str] = Field(None, max_length=255)
+
+class CancellationNoticeRequest(BaseModel):
+    booking_id: str = Field(..., description="Booking ID")
+    customer_name: str = Field(..., min_length=1, max_length=255)
+    customer_email: EmailStr = Field(..., description="Customer email address")
+    meeting_title: str = Field(..., min_length=1, max_length=255)
+    original_meeting_date: datetime = Field(..., description="Original meeting date and time")
+    cancelled_by: str = Field(..., description="Who cancelled the meeting")
+    cancellation_reason: Optional[str] = Field(None, max_length=500)
+    host_name: str = Field(..., min_length=1, max_length=255)
+    reschedule_link: Optional[str] = Field(None, description="Link to reschedule")
+    company_name: Optional[str] = Field(None, max_length=255)
+
+class NotificationResponse(BaseModel):
+    success: bool
+    message: str
+    notification_id: Optional[str] = None
