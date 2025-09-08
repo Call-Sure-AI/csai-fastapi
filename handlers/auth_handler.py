@@ -12,7 +12,8 @@ from app.db.postgres_client import postgres_client
 from app.db.queries.auth_queries import AuthQueries
 from app.db.queries.user_queries import UserQueries
 from app.db.queries.account_queries import AccountQueries
-from app.db.queries.otp_queries import OTPQueries
+#from app.db.queries.otp_queries import OTPQueries
+from app.db.repositories.otp_repository import otp_repository
 from app.db.queries.company_queries import CompanyQueries
 from app.models.schemas import (
     GoogleAuthRequest, EmailCheckRequest, SignUpRequest, SignInRequest,
@@ -20,6 +21,7 @@ from app.models.schemas import (
     MessageResponse, UserResponse
 )
 from .email_handler import email_handler
+from app.db.repositories.otp_repository import otp_repository
 
 
 class AuthHandler:
@@ -211,7 +213,7 @@ class AuthHandler:
             print(f'Sign up error: {error}')
             raise HTTPException(status_code=500, detail="Internal server error")
 
-    @staticmethod
+    """@staticmethod
     async def generate_otp(otp_request: GenerateOTPRequest) -> MessageResponse:
         try:
             # Generate 6-digit OTP
@@ -232,9 +234,26 @@ class AuthHandler:
             
         except Exception as error:
             print(f'Generate OTP error: {error}')
-            raise HTTPException(status_code=500, detail="Internal server error")
+            raise HTTPException(status_code=500, detail="Internal server error")"""
 
     @staticmethod
+    async def generate_otp(otp_request: GenerateOTPRequest) -> MessageResponse:
+        try:
+            code = str(random.randint(100000, 999999))
+            expires_at = datetime.utcnow() + timedelta(minutes=10)
+            
+            await otp_repository.put_otp(otp_request.email, code, expires_at)
+
+            await email_handler.send_otp_email(otp_request.email, code)
+            
+            return MessageResponse(message="OTP sent successfully")
+            
+        except Exception as error:
+            print(f'Generate OTP error: {error}')
+            raise HTTPException(status_code=500, detail="Internal server error")
+
+
+    """@staticmethod
     async def verify_otp(otp_request: VerifyOTPRequest, response: Response) -> AuthResponse:
         try:
             print(f'Verify OTP request: {otp_request}')
@@ -339,6 +358,91 @@ class AuthHandler:
             raise
         except Exception as error:
             print(f'Verify OTP error: {error}')
+            raise HTTPException(status_code=500, detail="Internal server error")"""
+
+    @staticmethod
+    async def verify_otp(otp_request: VerifyOTPRequest, response: Response) -> AuthResponse:
+        try:
+            item = await otp_repository.get_valid_otp(otp_request.email, otp_request.code)
+            if not item:
+                raise HTTPException(status_code=400, detail="Invalid or expired OTP")
+
+            await otp_repository.delete_otp(otp_request.email)
+
+            query, params = UserQueries.get_user_by_email_params(otp_request.email)
+            user = await postgres_client.client.execute_query(query, params)
+            user = user[0] if user else None
+            new_user = False
+
+            print(f'User: {user}')
+            
+            if not user:
+                new_user = True
+                userId = str(uuid.uuid4())
+
+                jwt_token = jwt.encode(
+                    {'email': otp_request.email}, 
+                    os.getenv('JWT_SECRET', 'secret-key'), 
+                    algorithm='HS256'
+                )
+                
+                transaction_queries = AuthQueries.create_user_with_otp_verification_transaction(
+                    userId, otp_request.email, otp_request.email.split('@')[0], jwt_token
+                )
+                
+                results = await postgres_client.client.execute_transaction(transaction_queries)
+                user = results[0][0] if results[0] else None
+            
+            if not user:
+                raise HTTPException(status_code=500, detail="User creation failed")
+
+            role = 'admin' if new_user else await AuthHandler._get_user_role(user['id'])
+
+            token = jwt.encode(
+                {
+                    'id': str(user['id']),
+                    'email': user['email'],
+                    'role': role,
+                    'name': user['name'],
+                    'image': user.get('image'),
+                    'exp': datetime.utcnow() + timedelta(days=7)
+                },
+                os.getenv('JWT_SECRET', 'your-secret-key'),
+                algorithm='HS256'
+            )
+            
+            user_data = UserResponse(
+                id=str(user['id']),
+                email=user['email'],
+                name=user['name'],
+                image=user.get('image'),
+                role=role
+            )
+
+            response.set_cookie(
+                key="token", 
+                value=token, 
+                httponly=True, 
+                secure=True, 
+                samesite='lax',
+                max_age=7 * 24 * 60 * 60
+            )
+            response.set_cookie(
+                key="user", 
+                value=user_data.model_dump_json(),
+                max_age=7 * 24 * 60 * 60
+            )
+            
+            return AuthResponse(
+                token=token,
+                user=user_data,
+                newUser=new_user
+            )
+            
+        except HTTPException:
+            raise
+        except Exception as error:
+            print(f'Verify OTP error: {error}')
             raise HTTPException(status_code=500, detail="Internal server error")
 
     @staticmethod
@@ -429,7 +533,7 @@ class AuthHandler:
         if not is_valid_password:
             raise HTTPException(status_code=401, detail="Invalid credentials")
 
-    @staticmethod
+    """@staticmethod
     async def _verify_otp_for_signin(email: str, code: str):
         query, params = OTPQueries.get_valid_otp_params(email, code)
         otps = await postgres_client.client.execute_query(query, params)
@@ -469,7 +573,41 @@ class AuthHandler:
                 raise
             except Exception as error:
                 print(f'Get profile error: {error}')
+                raise HTTPException(status_code=500, detail="Internal server error")"""
+
+    @staticmethod
+    async def _verify_otp_for_signin(email: str, code: str):
+        item = await otp_repository.get_valid_otp(email, code)
+        if not item:
+            raise HTTPException(status_code=400, detail="Invalid or expired OTP")
+        await otp_repository.delete_otp(email)
+
+        @staticmethod
+        async def get_profile(userId: str) -> UserResponse:
+            try:
+                query, params = UserQueries.get_user_by_id_params(userId)
+                user = await postgres_client.client.execute_query(query, params)
+                
+                if not user:
+                    raise HTTPException(status_code=404, detail="User not found")
+                
+                user = user[0]
+                role = await AuthHandler._get_user_role(user['id'])
+                
+                return UserResponse(
+                    id=str(user['id']),
+                    name=user['name'],
+                    email=user['email'],
+                    image=user.get('image'),
+                    role=role
+                )
+                
+            except HTTPException:
+                raise
+            except Exception as error:
+                print(f'Get profile error: {error}')
                 raise HTTPException(status_code=500, detail="Internal server error")
+
 
     @staticmethod
     async def _get_user_role(userId: str) -> str:
