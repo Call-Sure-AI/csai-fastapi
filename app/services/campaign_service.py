@@ -392,6 +392,7 @@ class CampaignService:
             leads = []
             
             for row in reader:
+                lead = await self.get_or_create_lead(row)
                 lead_id = f"LEAD-{uuid.uuid4().hex[:8].upper()}"
                 leads.append((
                     lead_id,
@@ -405,6 +406,7 @@ class CampaignService:
                     datetime.utcnow(),
                     datetime.utcnow()
                 ))
+                await self.add_lead_to_campaign(lead['id'], campaign_id)
             
             async with await get_db_connection() as conn:
                 await conn.executemany("""
@@ -1054,3 +1056,192 @@ class CampaignService:
                 campaign_id
             )
             return result["count"] if result else 0
+
+    async def get_or_create_lead(self, lead_data: Dict[str, Any], company_id: str) -> Dict[str, Any]:
+        """Get existing lead or create new one in master leads table"""
+        
+        email = lead_data.get('email', '').strip().lower()
+        if not email:
+            raise ValueError("Email is required for lead creation")
+        
+        async with await get_db_connection() as conn:
+            # Check if lead exists for this company
+            existing_lead = await conn.fetchrow("""
+                SELECT * FROM leads 
+                WHERE company_id = $1 AND LOWER(email) = $2
+            """, uuid.UUID(company_id), email)
+            
+            if existing_lead:
+                # Update existing lead with new data if provided
+                update_fields = []
+                update_values = []
+                param_count = 1
+                
+                for field in ['first_name', 'last_name', 'phone', 'lead_company']:
+                    if lead_data.get(field) and not existing_lead[field]:
+                        update_fields.append(f"{field} = ${param_count}")
+                        update_values.append(lead_data[field])
+                        param_count += 1
+                
+                if update_fields:
+                    update_fields.append("updated_at = CURRENT_TIMESTAMP")
+                    update_values.extend([uuid.UUID(company_id), email])
+                    
+                    query = f"""
+                        UPDATE leads 
+                        SET {', '.join(update_fields)}
+                        WHERE company_id = ${param_count} AND LOWER(email) = ${param_count + 1}
+                        RETURNING *
+                    """
+                    result = await conn.fetchrow(query, *update_values)
+                    return dict(result)
+                
+                return dict(existing_lead)
+            
+            else:
+                # Create new lead
+                lead_id = uuid.uuid4()
+                now = datetime.utcnow()
+                
+                result = await conn.fetchrow("""
+                    INSERT INTO leads (
+                        id, company_id, email, first_name, last_name, 
+                        phone, lead_company, custom_fields, source, 
+                        created_at, updated_at
+                    ) VALUES (
+                        $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11
+                    ) RETURNING *
+                """,
+                    lead_id,
+                    uuid.UUID(company_id),
+                    email,
+                    lead_data.get('first_name'),
+                    lead_data.get('last_name'),
+                    lead_data.get('phone'),
+                    lead_data.get('company'),  # Maps to lead_company column
+                    json.dumps(lead_data.get('custom_fields', {})),
+                    lead_data.get('source', 'csv_import'),
+                    now,
+                    now
+                )
+                
+                return dict(result)
+    
+    async def add_lead_to_campaign(self, lead_id: str, campaign_id: str, lead_data: Dict[str, Any] = None) -> None:
+        """Add a lead to a campaign (create association)"""
+        
+        async with await get_db_connection() as conn:
+            # Check if association already exists
+            existing = await conn.fetchrow("""
+                SELECT id FROM campaign_leads 
+                WHERE campaign_id = $1 AND lead_id = $2
+            """, campaign_id, uuid.UUID(lead_id) if isinstance(lead_id, str) else lead_id)
+            
+            if not existing:
+                await conn.execute("""
+                    INSERT INTO campaign_leads (
+                        campaign_id, lead_id, campaign_status, 
+                        campaign_custom_fields, added_to_campaign_at
+                    ) VALUES (
+                        $1, $2, $3, $4, $5
+                    )
+                """,
+                    campaign_id,
+                    uuid.UUID(lead_id) if isinstance(lead_id, str) else lead_id,
+                    'pending',
+                    json.dumps(lead_data.get('custom_fields', {})) if lead_data else '{}',
+                    datetime.utcnow()
+                )
+    
+    async def import_leads_csv_v2(self, campaign_id: str, csv_content: str, user_id: str, company_id: str) -> Dict[str, Any]:
+        """Import leads using new lead management system"""
+        
+        reader = csv.DictReader(io.StringIO(csv_content))
+        
+        imported = 0
+        updated = 0
+        failed = 0
+        errors = []
+        
+        async with await get_db_connection() as conn:
+            async with conn.transaction():
+                for row_num, row in enumerate(reader, start=2):
+                    try:
+                        # Prepare lead data
+                        lead_data = {
+                            'email': row.get('email', '').strip(),
+                            'first_name': row.get('first_name', '').strip(),
+                            'last_name': row.get('last_name', '').strip(),
+                            'phone': row.get('phone', '').strip(),
+                            'company': row.get('company', '').strip(),
+                            'source': 'csv_import',
+                            'custom_fields': {}
+                        }
+                        
+                        # Add any extra fields to custom_fields
+                        standard_fields = {'email', 'first_name', 'last_name', 'phone', 'company'}
+                        for field, value in row.items():
+                            if field not in standard_fields and value:
+                                lead_data['custom_fields'][field] = value
+                        
+                        # Get or create lead in master table
+                        lead = await self.get_or_create_lead(lead_data, company_id)
+                        
+                        if lead.get('created_at') == lead.get('updated_at'):
+                            imported += 1
+                        else:
+                            updated += 1
+                        
+                        # Add to campaign
+                        await self.add_lead_to_campaign(lead['id'], campaign_id, lead_data)
+                        
+                    except Exception as e:
+                        failed += 1
+                        errors.append({
+                            'row': row_num,
+                            'error': str(e),
+                            'data': row
+                        })
+                        logger.error(f"Error importing row {row_num}: {e}")
+        
+        return {
+            'imported': imported,
+            'updated': updated,
+            'failed': failed,
+            'total': imported + updated + failed,
+            'errors': errors[:10]  # Return first 10 errors
+        }
+    
+    async def get_campaign_leads_v2(self, campaign_id: str, offset: int = 0, limit: int = 100) -> List[Dict]:
+        """Get leads for a campaign using new structure"""
+        
+        async with await get_db_connection() as conn:
+            rows = await conn.fetch("""
+                SELECT 
+                    l.*,
+                    cl.campaign_status,
+                    cl.call_attempts,
+                    cl.last_call_at,
+                    cl.email_attempts,
+                    cl.campaign_custom_fields,
+                    cl.added_to_campaign_at
+                FROM campaign_leads cl
+                JOIN leads l ON l.id = cl.lead_id
+                WHERE cl.campaign_id = $1
+                ORDER BY cl.added_to_campaign_at DESC
+                OFFSET $2 LIMIT $3
+            """, campaign_id, offset, limit)
+            
+            return [dict(row) for row in rows]
+    
+    async def update_campaign_lead_status(self, campaign_id: str, lead_id: str, status: str) -> bool:
+        """Update lead status within a campaign"""
+        
+        async with await get_db_connection() as conn:
+            result = await conn.execute("""
+                UPDATE campaign_leads 
+                SET campaign_status = $1, updated_at = CURRENT_TIMESTAMP
+                WHERE campaign_id = $2 AND lead_id = $3
+            """, status, campaign_id, uuid.UUID(lead_id) if isinstance(lead_id, str) else lead_id)
+            
+            return result.startswith("UPDATE 1")

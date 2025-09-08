@@ -1,0 +1,546 @@
+{
+    "name": "Lead Management",
+    "item": [
+      {
+        "name": "Import",
+        "item": [
+          {
+            "name": "Import CSV",
+            "request": {
+              "method": "POST",
+              "header": [
+                {
+                  "key": "Authorization",
+                  "value": "Bearer {{auth_token}}",
+                  "type": "text"
+                }
+              ],
+              "body": {
+                "mode": "formdata",
+                "formdata": [
+                  {
+                    "key": "file",
+                    "type": "file",
+                    "src": ""
+                  }
+                ]
+              },
+              "url": {
+                "raw": "{{base_url}}/api/leads/import/csv",
+                "host": ["{{base_url}}"],
+                "path": ["api", "leads", "import", "csv"]
+              }
+            }
+          },
+          {
+            "name": "Import API",
+            "request": {
+              "method": "POST",
+              "header": [
+                {
+                  "key": "Authorization",
+                  "value": "Bearer {{auth_token}}",
+                  "type": "text"
+                },
+                {
+                  "key": "Content-Type",
+                  "value": "application/json",
+                  "type": "text"
+                }
+              ],
+              "body": {
+                "mode": "raw",
+                "raw": "{\n    \"source\": \"api\",\n    \"data\": [\n        {\n            \"email\": \"test@example.com\",\n            \"first_name\": \"Test\",\n            \"last_name\": \"User\",\n            \"phone\": \"+1234567890\",\n            \"company\": \"Test Corp\"\n        }\n    ]\n}"
+              },
+              "url": {
+                "raw": "{{base_url}}/api/leads/import/api",
+                "host": ["{{base_url}}"],
+                "path": ["api", "leads", "import", "api"]
+              }
+            }
+          }
+        ]
+      },
+      {
+        "name": "Leads CRUD",
+        "item": [
+          {
+            "name": "Get All Leads",
+            "request": {
+              "method": "GET",
+              "header": [
+                {
+                  "key": "Authorization",
+                  "value": "Bearer {{auth_token}}",
+                  "type": "text"
+                }
+              ],
+              "url": {
+                "raw": "{{base_url}}/api/leads?page=1&page_size=50",
+                "host": ["{{base_url}}"],
+                "path": ["api", "leads"],
+                "query": [
+                  {"key": "page", "value": "1"},
+                  {"key": "page_size", "value": "50"},
+                  {"key": "status", "value": "new", "disabled": true},
+                  {"key": "source", "value": "csv_import", "disabled": true},
+                  {"key": "priority", "value": "high", "disabled": true},
+                  {"key": "score_min", "value": "50", "disabled": true},
+                  {"key": "score_max", "value": "100", "disabled": true},
+                  {"key": "search_query", "value": "", "disabled": true}
+                ]
+              }
+            }
+          },
+          {
+            "name": "Get Lead by ID",
+            "request": {
+              "method": "GET",
+              "header": [
+                {
+                  "key": "Authorization",
+                  "value": "Bearer {{auth_token}}",
+                  "type": "text"
+                }
+              ],
+              "url": {
+                "raw": "{{base_url}}/api/leads/{{lead_id}}",
+                "host": ["{{base_url}}"],
+                "path": ["api", "leads", "{{lead_id}}"]
+              }
+            }
+          },
+          {
+            "name": "Update Lead",
+            "request": {
+              "method": "PUT",
+              "header": [
+                {
+                  "key": "Authorization",
+                  "value": "Bearer {{auth_token}}",
+                  "type": "text"
+                },
+                {
+                  "key": "Content-Type",
+                  "value": "application/json",
+                  "type": "text"
+                }
+              ],
+              "body": {
+                "mode": "raw",
+                "raw": "{\n    \"status\": \"contacted\",\n    \"score\": 75,\n    \"priority\": \"high\"\n}"
+              },
+              "url": {
+                "raw": "{{base_url}}/api/leads/{{lead_id}}",
+                "host": ["{{base_url}}"],
+                "path": ["api", "leads", "{{lead_id}}"]
+              }
+            }
+          },
+          {
+            "name": "Delete Lead",
+            "request": {
+              "method": "DELETE",
+              "header": [
+                {
+                  "key": "Authorization",
+                  "value": "Bearer {{auth_token}}",
+                  "type": "text"
+                }
+              ],
+              "url": {
+                "raw": "{{base_url}}/api/leads/{{lead_id}}",
+                "host": ["{{base_url}}"],
+                "path": ["api", "leads", "{{lead_id}}"]
+              }
+            }
+          },
+          {
+            "name": "Bulk Update",
+            "request": {
+              "method": "PATCH",
+              "header": [
+                {
+                  "key": "Authorization",
+                  "value": "Bearer {{auth_token}}",
+                  "type": "text"
+                },
+                {
+                  "key": "Content-Type",
+                  "value": "application/json",
+                  "type": "text"
+                }
+              ],
+              "body": {
+                "mode": "raw",
+                "raw": "{\n    \"lead_ids\": [\"{{lead_id}}\"],\n    \"updates\": {\n        \"status\": \"qualified\",\n        \"priority\": \"high\"\n    }\n}"
+              },
+              "url": {
+                "raw": "{{base_url}}/api/leads/bulk-update",
+                "host": ["{{base_url}}"],
+                "path": ["api", "leads", "bulk-update"]
+              }
+            }
+          }
+        ]
+      },
+      {
+        "name": "Scoring",
+        "item": [
+          {
+            "name": "Score Leads",
+            "request": {
+              "method": "POST",
+              "header": [
+                {
+                  "key": "Authorization",
+                  "value": "Bearer {{auth_token}}",
+                  "type": "text"
+                },
+                {
+                  "key": "Content-Type",
+                  "value": "application/json",
+                  "type": "text"
+                }
+              ],
+              "body": {
+                "mode": "raw",
+                "raw": "{\n    \"lead_ids\": [\"{{lead_id}}\"],\n    \"scoring_model\": \"default\"\n}"
+              },
+              "url": {
+                "raw": "{{base_url}}/api/leads/score",
+                "host": ["{{base_url}}"],
+                "path": ["api", "leads", "score"]
+              }
+            }
+          }
+        ]
+      },
+      {
+        "name": "Segments",
+        "item": [
+          {
+            "name": "Get Segments",
+            "request": {
+              "method": "GET",
+              "header": [
+                {
+                  "key": "Authorization",
+                  "value": "Bearer {{auth_token}}",
+                  "type": "text"
+                }
+              ],
+              "url": {
+                "raw": "{{base_url}}/api/leads/segments",
+                "host": ["{{base_url}}"],
+                "path": ["api", "leads", "segments"]
+              }
+            }
+          },
+          {
+            "name": "Create Segment",
+            "request": {
+              "method": "POST",
+              "header": [
+                {
+                  "key": "Authorization",
+                  "value": "Bearer {{auth_token}}",
+                  "type": "text"
+                },
+                {
+                  "key": "Content-Type",
+                  "value": "application/json",
+                  "type": "text"
+                }
+              ],
+              "body": {
+                "mode": "raw",
+                "raw": "{\n    \"name\": \"High Value\",\n    \"description\": \"High scoring leads\",\n    \"criteria\": {\n        \"score_min\": 70\n    }\n}"
+              },
+              "url": {
+                "raw": "{{base_url}}/api/leads/segments",
+                "host": ["{{base_url}}"],
+                "path": ["api", "leads", "segments"]
+              }
+            }
+          },
+          {
+            "name": "Get Segment Leads",
+            "request": {
+              "method": "GET",
+              "header": [
+                {
+                  "key": "Authorization",
+                  "value": "Bearer {{auth_token}}",
+                  "type": "text"
+                }
+              ],
+              "url": {
+                "raw": "{{base_url}}/api/leads/segments/{{segment_id}}/leads",
+                "host": ["{{base_url}}"],
+                "path": ["api", "leads", "segments", "{{segment_id}}", "leads"]
+              }
+            }
+          }
+        ]
+      },
+      {
+        "name": "Distribution",
+        "item": [
+          {
+            "name": "Distribute Leads",
+            "request": {
+              "method": "POST",
+              "header": [
+                {
+                  "key": "Authorization",
+                  "value": "Bearer {{auth_token}}",
+                  "type": "text"
+                },
+                {
+                  "key": "Content-Type",
+                  "value": "application/json",
+                  "type": "text"
+                }
+              ],
+              "body": {
+                "mode": "raw",
+                "raw": "{\n    \"lead_ids\": [\"{{lead_id}}\"],\n    \"distribution_method\": \"round_robin\",\n    \"agent_ids\": [\"agent_1\", \"agent_2\"]\n}"
+              },
+              "url": {
+                "raw": "{{base_url}}/api/leads/distribute",
+                "host": ["{{base_url}}"],
+                "path": ["api", "leads", "distribute"]
+              }
+            }
+          }
+        ]
+      },
+      {
+        "name": "Nurturing",
+        "item": [
+          {
+            "name": "Get Campaigns",
+            "request": {
+              "method": "GET",
+              "header": [
+                {
+                  "key": "Authorization",
+                  "value": "Bearer {{auth_token}}",
+                  "type": "text"
+                }
+              ],
+              "url": {
+                "raw": "{{base_url}}/api/leads/nurture/campaigns",
+                "host": ["{{base_url}}"],
+                "path": ["api", "leads", "nurture", "campaigns"]
+              }
+            }
+          },
+          {
+            "name": "Run Campaign",
+            "request": {
+              "method": "POST",
+              "header": [
+                {
+                  "key": "Authorization",
+                  "value": "Bearer {{auth_token}}",
+                  "type": "text"
+                },
+                {
+                  "key": "Content-Type",
+                  "value": "application/json",
+                  "type": "text"
+                }
+              ],
+              "body": {
+                "mode": "raw",
+                "raw": "{\n    \"lead_ids\": [\"{{lead_id}}\"],\n    \"campaign_id\": \"{{nurture_campaign_id}}\",\n    \"start_immediately\": true\n}"
+              },
+              "url": {
+                "raw": "{{base_url}}/api/leads/nurture/run",
+                "host": ["{{base_url}}"],
+                "path": ["api", "leads", "nurture", "run"]
+              }
+            }
+          }
+        ]
+      },
+      {
+        "name": "Journey",
+        "item": [
+          {
+            "name": "Get Lead Journey",
+            "request": {
+              "method": "GET",
+              "header": [
+                {
+                  "key": "Authorization",
+                  "value": "Bearer {{auth_token}}",
+                  "type": "text"
+                }
+              ],
+              "url": {
+                "raw": "{{base_url}}/api/leads/{{lead_id}}/journey",
+                "host": ["{{base_url}}"],
+                "path": ["api", "leads", "{{lead_id}}", "journey"]
+              }
+            }
+          }
+        ]
+      },
+      {
+        "name": "Operations",
+        "item": [
+          {
+            "name": "Merge Leads",
+            "request": {
+              "method": "POST",
+              "header": [
+                {
+                  "key": "Authorization",
+                  "value": "Bearer {{auth_token}}",
+                  "type": "text"
+                },
+                {
+                  "key": "Content-Type",
+                  "value": "application/json",
+                  "type": "text"
+                }
+              ],
+              "body": {
+                "mode": "raw",
+                "raw": "{\n    \"primary_lead_id\": \"{{lead_id}}\",\n    \"duplicate_lead_ids\": [],\n    \"merge_strategy\": \"keep_primary\"\n}"
+              },
+              "url": {
+                "raw": "{{base_url}}/api/leads/merge",
+                "host": ["{{base_url}}"],
+                "path": ["api", "leads", "merge"]
+              }
+            }
+          },
+          {
+            "name": "Enrich Leads",
+            "request": {
+              "method": "POST",
+              "header": [
+                {
+                  "key": "Authorization",
+                  "value": "Bearer {{auth_token}}",
+                  "type": "text"
+                },
+                {
+                  "key": "Content-Type",
+                  "value": "application/json",
+                  "type": "text"
+                }
+              ],
+              "body": {
+                "mode": "raw",
+                "raw": "{\n    \"lead_ids\": [\"{{lead_id}}\"],\n    \"fields\": [\"company_info\"],\n    \"provider\": \"clearbit\"\n}"
+              },
+              "url": {
+                "raw": "{{base_url}}/api/leads/enrich",
+                "host": ["{{base_url}}"],
+                "path": ["api", "leads", "enrich"]
+              }
+            }
+          },
+          {
+            "name": "Cleanse Leads",
+            "request": {
+              "method": "POST",
+              "header": [
+                {
+                  "key": "Authorization",
+                  "value": "Bearer {{auth_token}}",
+                  "type": "text"
+                },
+                {
+                  "key": "Content-Type",
+                  "value": "application/json",
+                  "type": "text"
+                }
+              ],
+              "body": {
+                "mode": "raw",
+                "raw": "[\"{{lead_id}}\"]"
+              },
+              "url": {
+                "raw": "{{base_url}}/api/leads/cleanse",
+                "host": ["{{base_url}}"],
+                "path": ["api", "leads", "cleanse"]
+              }
+            }
+          }
+        ]
+      },
+      {
+        "name": "Analytics",
+        "item": [
+          {
+            "name": "Get Stats",
+            "request": {
+              "method": "GET",
+              "header": [
+                {
+                  "key": "Authorization",
+                  "value": "Bearer {{auth_token}}",
+                  "type": "text"
+                }
+              ],
+              "url": {
+                "raw": "{{base_url}}/api/leads/analytics/stats?group_by=status",
+                "host": ["{{base_url}}"],
+                "path": ["api", "leads", "analytics", "stats"],
+                "query": [
+                  {"key": "group_by", "value": "status"}
+                ]
+              }
+            }
+          }
+        ]
+      },
+      {
+        "name": "Export",
+        "item": [
+          {
+            "name": "Export CSV",
+            "request": {
+              "method": "GET",
+              "header": [
+                {
+                  "key": "Authorization",
+                  "value": "Bearer {{auth_token}}",
+                  "type": "text"
+                }
+              ],
+              "url": {
+                "raw": "{{base_url}}/api/leads/export/csv",
+                "host": ["{{base_url}}"],
+                "path": ["api", "leads", "export", "csv"]
+              }
+            }
+          },
+          {
+            "name": "Export Excel",
+            "request": {
+              "method": "GET",
+              "header": [
+                {
+                  "key": "Authorization",
+                  "value": "Bearer {{auth_token}}",
+                  "type": "text"
+                }
+              ],
+              "url": {
+                "raw": "{{base_url}}/api/leads/export/excel",
+                "host": ["{{base_url}}"],
+                "path": ["api", "leads", "export", "excel"]
+              }
+            }
+          }
+        ]
+      }
+    ]
+  }
