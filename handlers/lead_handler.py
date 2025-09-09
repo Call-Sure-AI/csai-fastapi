@@ -533,21 +533,21 @@ class LeadHandler:
             'source_quality': 10
         }
     
-    async def get_segments(self) -> List[LeadSegment]:
-        """Get all lead segments"""
-        async with await get_db_connection() as conn:
-            segments = await conn.fetch(self.queries.get_segments())
-            return [LeadSegment(**dict(segment)) for segment in segments]
-    
-    async def create_segment(self, segment: LeadSegment) -> LeadSegment:
-        """Create a new lead segment"""
+    async def create_segment(self, segment: LeadSegment, company_id: str) -> LeadSegment:
         segment_id = f"SEG-{str(uuid.uuid4())[:8].upper()}"
         now = datetime.utcnow()
         
         async with await get_db_connection() as conn:
             await conn.execute(
-                self.queries.create_segment(),
+                """
+                INSERT INTO lead_segments (
+                    id, company_id, name, description, criteria, created_at, updated_at
+                ) VALUES (
+                    $1, $2, $3, $4, $5, $6, $7
+                ) RETURNING id
+                """,
                 segment_id,
+                company_id,
                 segment.name,
                 segment.description,
                 json.dumps(segment.criteria),
@@ -560,6 +560,24 @@ class LeadHandler:
         segment.updated_at = now
         
         return segment
+
+    async def get_segments(self, company_id: str) -> List[LeadSegment]:
+        async with await get_db_connection() as conn:
+            segments = await conn.fetch(
+                """
+                SELECT 
+                    s.id, s.name, s.description, s.criteria,
+                    s.created_at, s.updated_at,
+                    COUNT(DISTINCT lss.lead_id) as lead_count
+                FROM lead_segments s
+                LEFT JOIN lead_segment_members lss ON s.id = lss.segment_id
+                WHERE s.company_id = $1
+                GROUP BY s.id
+                ORDER BY s.created_at DESC
+                """,
+                company_id
+            )
+            return [LeadSegment(**dict(segment)) for segment in segments]
     
     async def distribute_leads(self, request: LeadDistributionRequest) -> LeadDistributionResponse:
         """Distribute leads to agents"""
@@ -726,3 +744,234 @@ class LeadHandler:
             json.dumps(event_data),
             datetime.utcnow()
         )
+
+    async def bulk_update_leads(self, request: BulkLeadUpdate) -> Dict[str, Any]:
+        """Bulk update multiple leads with the same updates"""
+        if not request.lead_ids:
+            raise HTTPException(status_code=400, detail="No lead IDs provided")
+        
+        if not request.updates:
+            raise HTTPException(status_code=400, detail="No updates provided")
+        
+        async with await get_db_connection() as conn:
+            # Build the SET clause dynamically
+            set_clauses = []
+            values = []
+            param_count = 1
+            
+            for field, value in request.updates.items():
+                # Skip fields that shouldn't be bulk updated
+                if field in ['id', 'created_at', 'email']:  # email is unique, shouldn't be bulk updated
+                    continue
+                    
+                if field in ['tags', 'custom_fields']:
+                    set_clauses.append(f"{field} = ${param_count}::jsonb")
+                    values.append(json.dumps(value))
+                else:
+                    set_clauses.append(f"{field} = ${param_count}")
+                    values.append(value)
+                param_count += 1
+            
+            if not set_clauses:
+                raise HTTPException(status_code=400, detail="No valid fields to update")
+            
+            # Add updated_at
+            set_clauses.append(f"updated_at = ${param_count}")
+            values.append(datetime.utcnow())
+            param_count += 1
+            
+            # Add lead_ids as the last parameter
+            values.append(request.lead_ids)
+            
+            # Build and execute the query
+            query = f"""
+                UPDATE leads 
+                SET {', '.join(set_clauses)}
+                WHERE id = ANY(${param_count})
+                RETURNING id, email, status, score
+            """
+            
+            try:
+                results = await conn.fetch(query, *values)
+                
+                # Record bulk update events for each lead
+                for lead in results:
+                    await self._record_lead_event(
+                        conn,
+                        lead['id'],
+                        'bulk_updated',
+                        {
+                            'fields_updated': list(request.updates.keys()),
+                            'updated_values': request.updates
+                        }
+                    )
+                
+                updated_count = len(results)
+                
+                return {
+                    "success": True,
+                    "updated_count": updated_count,
+                    "updated_lead_ids": [dict(r)['id'] for r in results],
+                    "message": f"Successfully updated {updated_count} leads"
+                }
+                
+            except Exception as e:
+                logger.error(f"Error in bulk update: {str(e)}")
+                raise HTTPException(status_code=500, detail=f"Failed to update leads: {str(e)}")
+
+    async def merge_leads(self, request: LeadMergeRequest) -> Dict[str, Any]:
+        """Merge duplicate leads into a primary lead"""
+        if not request.duplicate_lead_ids:
+            raise HTTPException(status_code=400, detail="No duplicate lead IDs provided")
+        
+        if request.primary_lead_id in request.duplicate_lead_ids:
+            raise HTTPException(status_code=400, detail="Primary lead ID cannot be in duplicate IDs list")
+        
+        async with await get_db_connection() as conn:
+            # Get all leads involved in the merge
+            all_lead_ids = [request.primary_lead_id] + request.duplicate_lead_ids
+            leads = await conn.fetch(
+                """
+                SELECT * FROM leads 
+                WHERE id = ANY($1)
+                """,
+                all_lead_ids
+            )
+            
+            if len(leads) != len(all_lead_ids):
+                raise HTTPException(status_code=404, detail="One or more leads not found")
+            
+            # Find the primary lead
+            primary_lead = None
+            duplicate_leads = []
+            for lead in leads:
+                if lead['id'] == request.primary_lead_id:
+                    primary_lead = dict(lead)
+                else:
+                    duplicate_leads.append(dict(lead))
+            
+            if not primary_lead:
+                raise HTTPException(status_code=404, detail="Primary lead not found")
+            
+            # Determine merge strategy
+            merged_data = {}
+            
+            if request.merge_strategy == "keep_primary":
+                # Only fill in missing fields from duplicates
+                for field in ['first_name', 'last_name', 'phone', 'lead_company', 'job_title', 
+                            'industry', 'country', 'city', 'state']:
+                    if not primary_lead.get(field):
+                        for dup in duplicate_leads:
+                            if dup.get(field):
+                                merged_data[field] = dup[field]
+                                break
+            
+            elif request.merge_strategy == "most_recent":
+                # Use the most recently updated values
+                all_leads_sorted = sorted([primary_lead] + duplicate_leads, 
+                                        key=lambda x: x.get('updated_at', datetime.min), 
+                                        reverse=True)
+                for field in ['first_name', 'last_name', 'phone', 'lead_company', 'job_title',
+                            'industry', 'country', 'city', 'state']:
+                    for lead in all_leads_sorted:
+                        if lead.get(field):
+                            merged_data[field] = lead[field]
+                            break
+            
+            elif request.merge_strategy == "custom" and request.field_preferences:
+                # Use specified lead for each field
+                for field, lead_id in request.field_preferences.items():
+                    for lead in [primary_lead] + duplicate_leads:
+                        if lead['id'] == lead_id and lead.get(field):
+                            merged_data[field] = lead[field]
+                            break
+            
+            # Merge tags (combine unique tags from all leads)
+            all_tags = set()
+            for lead in [primary_lead] + duplicate_leads:
+                tags = lead.get('tags', [])
+                if isinstance(tags, str):
+                    try:
+                        tags = json.loads(tags)
+                    except:
+                        tags = []
+                if tags:
+                    all_tags.update(tags)
+            if all_tags:
+                merged_data['tags'] = list(all_tags)
+            
+            # Merge custom_fields (combine all custom fields)
+            all_custom_fields = {}
+            for lead in [primary_lead] + duplicate_leads:
+                custom_fields = lead.get('custom_fields', {})
+                if isinstance(custom_fields, str):
+                    try:
+                        custom_fields = json.loads(custom_fields)
+                    except:
+                        custom_fields = {}
+                all_custom_fields.update(custom_fields)
+            if all_custom_fields:
+                merged_data['custom_fields'] = all_custom_fields
+            
+            # Calculate the highest score
+            max_score = max([lead.get('score', 0) for lead in [primary_lead] + duplicate_leads])
+            if max_score > primary_lead.get('score', 0):
+                merged_data['score'] = max_score
+            
+            # Start transaction for merge operation
+            async with conn.transaction():
+                # Update the primary lead with merged data
+                if merged_data:
+                    set_clauses = []
+                    values = []
+                    param_count = 1
+                    
+                    for field, value in merged_data.items():
+                        if field in ['tags', 'custom_fields']:
+                            set_clauses.append(f"{field} = ${param_count}::jsonb")
+                            values.append(json.dumps(value))
+                        else:
+                            set_clauses.append(f"{field} = ${param_count}")
+                            values.append(value)
+                        param_count += 1
+                    
+                    set_clauses.append(f"updated_at = ${param_count}")
+                    values.append(datetime.utcnow())
+                    param_count += 1
+                    
+                    values.append(request.primary_lead_id)
+                    
+                    query = f"""
+                        UPDATE leads 
+                        SET {', '.join(set_clauses)}
+                        WHERE id = ${param_count}
+                        RETURNING *
+                    """
+                    
+                    await conn.execute(query, *values)
+                
+                # Delete duplicate leads
+                await conn.execute(
+                    "DELETE FROM leads WHERE id = ANY($1)",
+                    request.duplicate_lead_ids
+                )
+                
+                # Record merge event
+                await self._record_lead_event(
+                    conn,
+                    request.primary_lead_id,
+                    'leads_merged',
+                    {
+                        'merged_lead_ids': request.duplicate_lead_ids,
+                        'merge_strategy': request.merge_strategy,
+                        'fields_updated': list(merged_data.keys())
+                    }
+                )
+            
+            return {
+                "success": True,
+                "primary_lead_id": request.primary_lead_id,
+                "merged_count": len(request.duplicate_lead_ids),
+                "merged_fields": list(merged_data.keys()),
+                "message": f"Successfully merged {len(request.duplicate_lead_ids)} leads into {request.primary_lead_id}"
+            }
