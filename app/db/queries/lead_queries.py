@@ -8,14 +8,18 @@ class LeadQueries:
     def create_lead() -> str:
         return """
         INSERT INTO leads (
-            id, email, first_name, last_name, phone, company,
+            id, company_id, email, first_name, last_name, phone, lead_company,
             job_title, industry, country, city, state,
             source, status, priority, score, tags,
-            custom_fields, assigned_to, created_at, updated_at
+            custom_fields, assigned_to, created_by, created_at, updated_at
         ) VALUES (
             $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11,
-            $12, $13, $14, $15, $16, $17, $18, $19, $20
-        ) ON CONFLICT (email) DO UPDATE SET
+            $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22
+        ) ON CONFLICT (company_id, email) DO UPDATE SET
+            first_name = COALESCE(EXCLUDED.first_name, leads.first_name),
+            last_name = COALESCE(EXCLUDED.last_name, leads.last_name),
+            phone = COALESCE(EXCLUDED.phone, leads.phone),
+            lead_company = COALESCE(EXCLUDED.lead_company, leads.lead_company),
             updated_at = EXCLUDED.updated_at
         RETURNING id, email
         """
@@ -24,16 +28,16 @@ class LeadQueries:
     def bulk_create_leads() -> str:
         return """
         INSERT INTO leads (
-            id, email, first_name, last_name, phone, company,
+            id, company_id, email, first_name, last_name, phone, lead_company,
             job_title, industry, country, city, state,
             source, status, priority, score, tags,
-            custom_fields, assigned_to, created_at, updated_at
+            custom_fields, assigned_to, created_by, created_at, updated_at
         ) VALUES $1
-        ON CONFLICT (email) DO UPDATE SET
+        ON CONFLICT (company_id, email) DO UPDATE SET
             first_name = COALESCE(EXCLUDED.first_name, leads.first_name),
             last_name = COALESCE(EXCLUDED.last_name, leads.last_name),
             phone = COALESCE(EXCLUDED.phone, leads.phone),
-            company = COALESCE(EXCLUDED.company, leads.company),
+            lead_company = COALESCE(EXCLUDED.lead_company, leads.lead_company),
             updated_at = EXCLUDED.updated_at
         RETURNING id, email
         """
@@ -42,10 +46,11 @@ class LeadQueries:
     def get_lead_by_id() -> str:
         return """
         SELECT 
-            id, email, first_name, last_name, phone, company_id,
+            id, company_id, email, first_name, last_name, phone, lead_company,
             job_title, industry, country, city, state,
-            source, status, priority, score, tags,
-            custom_fields, assigned_to, created_at, updated_at,
+            source, status, priority, score, 
+            tags, custom_fields, 
+            assigned_to, created_by, created_at, updated_at,
             last_contacted_at, converted_at
         FROM leads 
         WHERE id = $1
@@ -55,10 +60,11 @@ class LeadQueries:
     def get_leads_by_ids() -> str:
         return """
         SELECT 
-            id, email, first_name, last_name, phone, company,
+            id, company_id, email, first_name, last_name, phone, lead_company,
             job_title, industry, country, city, state,
-            source, status, priority, score, tags,
-            custom_fields, assigned_to, created_at, updated_at
+            source, status, priority, score, 
+            tags, custom_fields, 
+            assigned_to, created_by, created_at, updated_at
         FROM leads 
         WHERE id = ANY($1)
         """
@@ -67,10 +73,11 @@ class LeadQueries:
     def get_leads_filtered() -> str:
         return """
         SELECT 
-            id, email, first_name, last_name, phone, company,
+            id, company_id, email, first_name, last_name, phone, lead_company,
             job_title, industry, country, city, state,
-            source, status, priority, score, tags,
-            custom_fields, assigned_to, created_at, updated_at
+            source, status, priority, score, 
+            tags, custom_fields, 
+            assigned_to, created_by, created_at, updated_at
         FROM leads 
         WHERE 1=1
         {filters}
@@ -151,9 +158,9 @@ class LeadQueries:
     def create_segment() -> str:
         return """
         INSERT INTO lead_segments (
-            id, name, description, criteria, created_at, updated_at
+            id, company_id, name, description, criteria, created_at, updated_at
         ) VALUES (
-            $1, $2, $3, $4, $5, $6
+            $1, $2, $3, $4, $5, $6, $7
         ) RETURNING id
         """
     
@@ -166,6 +173,7 @@ class LeadQueries:
             COUNT(DISTINCT lss.lead_id) as lead_count
         FROM lead_segments s
         LEFT JOIN lead_segment_members lss ON s.id = lss.segment_id
+        WHERE s.company_id = $1
         GROUP BY s.id
         ORDER BY s.created_at DESC
         """
@@ -233,7 +241,7 @@ class LeadQueries:
     @staticmethod
     def get_lead_duplicates() -> str:
         return """
-        SELECT id, email, first_name, last_name, company_id, score
+        SELECT id, email, first_name, last_name, lead_company, company_id, score
         FROM leads
         WHERE LOWER(email) = LOWER($1)
            OR (LOWER(first_name) = LOWER($2) AND LOWER(last_name) = LOWER($3))

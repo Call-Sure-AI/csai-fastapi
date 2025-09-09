@@ -11,6 +11,8 @@ from app.models.leads import (
     LeadNurturingRequest, LeadJourney, LeadFilter,
     BulkLeadUpdate, LeadMergeRequest, LeadStatus, LeadSource, LeadPriority
 )
+from app.models.schemas import UserResponse
+from handlers.company_handler import CompanyHandler
 
 router = APIRouter(prefix="/leads", tags=["Lead Management"])
 lead_handler = LeadHandler()
@@ -209,20 +211,29 @@ async def score_leads(
     
     return await lead_handler.score_leads(request)
 
-@router.get("/segments", response_model=List[LeadSegment])
+@router.get("/get_all_segments", response_model=List[LeadSegment])
 async def get_segments(
-    current_user: dict = Depends(get_current_user)
+    current_user:    UserResponse   = Depends(get_current_user),
+    company_handler: CompanyHandler = Depends(CompanyHandler)
 ):
-
-    return await lead_handler.get_segments()
+    company = await company_handler.get_company_by_user(current_user.id)
+    if not company:
+        raise HTTPException(400, "User has no company")
+    company_id = company["id"]
+    return await lead_handler.get_segments(company_id)
 
 @router.post("/segments", response_model=LeadSegment)
 async def create_segment(
     segment: LeadSegment,
-    current_user: dict = Depends(get_current_user)
+    current_user:    UserResponse   = Depends(get_current_user),
+    company_handler: CompanyHandler = Depends(CompanyHandler)
 ):
 
-    return await lead_handler.create_segment(segment)
+    company = await company_handler.get_company_by_user(current_user.id)
+    if not company:
+        raise HTTPException(400, "User has no company")
+    company_id = company["id"]
+    return await lead_handler.create_segment(segment, company_id)
 
 @router.get("/segments/{segment_id}/leads", response_model=List[Lead])
 async def get_segment_leads(
