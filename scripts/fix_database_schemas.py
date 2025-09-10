@@ -1,336 +1,363 @@
-# scripts/fix_database_schema.py
 import asyncio
-import sys
-import os
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
-
-from app.db.postgres_client import get_db_connection
 import logging
+from typing import List, Dict, Any, Tuple
+import asyncpg
 
-logging.basicConfig(level=logging.INFO)
+# Configure logging
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
-async def check_existing_tables():
-    """Check what tables and columns already exist"""
-    async with await get_db_connection() as conn:
-        # Check if leads table exists and its structure
-        leads_exists = await conn.fetchval("""
-            SELECT EXISTS (
-                SELECT FROM information_schema.tables 
-                WHERE table_name = 'leads'
-            )
-        """)
+class ComprehensiveSchemaFixer:
+    def __init__(self, connection_string: str):
+        self.connection_string = connection_string
+        self.views_to_drop = []
+        self.view_definitions = {}
+        self.constraints_to_restore = []
         
-        if leads_exists:
-            # Get column info
-            columns = await conn.fetch("""
-                SELECT column_name, data_type 
-                FROM information_schema.columns 
-                WHERE table_name = 'leads'
-                ORDER BY ordinal_position
-            """)
-            
-            logger.info("Existing leads table columns:")
-            for col in columns:
-                logger.info(f"  - {col['column_name']}: {col['data_type']}")
-            
-            return True, columns
+    async def analyze_all_tables(self, conn: asyncpg.Connection) -> Dict[str, List[str]]:
+        """Analyze all tables to find UUID columns that should be VARCHAR"""
         
-        return False, []
-
-async def drop_and_recreate_tables():
-    """Drop existing tables and recreate with correct schema"""
-    async with await get_db_connection() as conn:
-        try:
-            logger.info("Dropping existing tables if they exist...")
-            
-            # Drop dependent tables first
-            drop_tables = [
-                "DROP TABLE IF EXISTS lead_integration_sources CASCADE",
-                "DROP TABLE IF EXISTS lead_call_logs CASCADE",
-                "DROP TABLE IF EXISTS lead_whatsapp_data CASCADE",
-                "DROP TABLE IF EXISTS lead_pool_members CASCADE",
-                "DROP TABLE IF EXISTS company_lead_pools CASCADE",
-                "DROP TABLE IF EXISTS lead_agent_interactions CASCADE",
-                "DROP TABLE IF EXISTS lead_distribution_history CASCADE",
-                "DROP TABLE IF EXISTS lead_score_history CASCADE",
-                "DROP TABLE IF EXISTS lead_nurturing_enrollment CASCADE",
-                "DROP TABLE IF EXISTS nurturing_campaigns CASCADE",
-                "DROP TABLE IF EXISTS lead_events CASCADE",
-                "DROP TABLE IF EXISTS lead_segment_members CASCADE",
-                "DROP TABLE IF EXISTS lead_segments CASCADE",
-                "DROP TABLE IF EXISTS campaign_leads CASCADE",
-                "DROP TABLE IF EXISTS leads CASCADE"
-            ]
-            
-            for drop_query in drop_tables:
-                await conn.execute(drop_query)
-                logger.info(f"  ✓ {drop_query.split()[4]}")
-            
-            logger.info("\nCreating tables with correct schema...")
-            
-            # 1. Create leads table with VARCHAR ID (to match your existing pattern)
-            await conn.execute("""
-                CREATE TABLE IF NOT EXISTS leads (
-                    id VARCHAR(255) PRIMARY KEY,
-                    company_id VARCHAR(255) NOT NULL,
-                    email VARCHAR(255) NOT NULL,
-                    first_name VARCHAR(100),
-                    last_name VARCHAR(100),
-                    phone VARCHAR(50),
-                    lead_company VARCHAR(255),
-                    job_title VARCHAR(255),
-                    industry VARCHAR(100),
-                    country VARCHAR(100),
-                    city VARCHAR(100),
-                    state VARCHAR(100),
-                    source VARCHAR(50) NOT NULL DEFAULT 'api',
-                    source_integration_id VARCHAR(255),
-                    status VARCHAR(50) NOT NULL DEFAULT 'new',
-                    priority VARCHAR(20) NOT NULL DEFAULT 'medium',
-                    score INTEGER DEFAULT 0 CHECK (score >= 0 AND score <= 100),
-                    tags JSONB DEFAULT '[]'::jsonb,
-                    custom_fields JSONB DEFAULT '{}'::jsonb,
-                    assigned_to VARCHAR(255),
-                    assigned_agent_id VARCHAR(255),
-                    created_by VARCHAR(255),
-                    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-                    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-                    last_contacted_at TIMESTAMP WITH TIME ZONE,
-                    converted_at TIMESTAMP WITH TIME ZONE,
-                    UNIQUE(company_id, email)
-                );
-            """)
-            logger.info("✓ Created leads table")
-
-            # 2. Campaign-Lead association table
-            await conn.execute("""
-                CREATE TABLE IF NOT EXISTS campaign_leads (
-                    id VARCHAR(255) PRIMARY KEY,
-                    campaign_id VARCHAR(255) NOT NULL REFERENCES Campaign(id) ON DELETE CASCADE,
-                    lead_id VARCHAR(255) NOT NULL REFERENCES leads(id) ON DELETE CASCADE,
-                    campaign_status VARCHAR(50) DEFAULT 'pending',
-                    call_attempts INTEGER DEFAULT 0,
-                    last_call_at TIMESTAMP WITH TIME ZONE,
-                    email_attempts INTEGER DEFAULT 0,
-                    last_email_at TIMESTAMP WITH TIME ZONE,
-                    campaign_custom_fields JSONB DEFAULT '{}'::jsonb,
-                    added_to_campaign_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-                    removed_from_campaign_at TIMESTAMP WITH TIME ZONE,
-                    campaign_converted_at TIMESTAMP WITH TIME ZONE,
-                    UNIQUE(campaign_id, lead_id)
-                );
-            """)
-            logger.info("✓ Created campaign_leads table")
-
-            # 3. Lead segments table
-            await conn.execute("""
-                CREATE TABLE IF NOT EXISTS lead_segments (
-                    id VARCHAR(255) PRIMARY KEY,
-                    company_id VARCHAR(255) NOT NULL,
-                    name VARCHAR(255) NOT NULL,
-                    description TEXT,
-                    criteria JSONB NOT NULL,
-                    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-                    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-                    created_by VARCHAR(255)
-                );
-            """)
-            logger.info("✓ Created lead_segments table")
-
-            # 4. Lead segment members
-            await conn.execute("""
-                CREATE TABLE IF NOT EXISTS lead_segment_members (
-                    lead_id VARCHAR(255) REFERENCES leads(id) ON DELETE CASCADE,
-                    segment_id VARCHAR(255) REFERENCES lead_segments(id) ON DELETE CASCADE,
-                    added_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-                    PRIMARY KEY (lead_id, segment_id)
-                );
-            """)
-            logger.info("✓ Created lead_segment_members table")
-
-            # 5. Lead events table
-            await conn.execute("""
-                CREATE TABLE IF NOT EXISTS lead_events (
-                    id VARCHAR(255) PRIMARY KEY,
-                    lead_id VARCHAR(255) REFERENCES leads(id) ON DELETE CASCADE,
-                    campaign_id VARCHAR(255) REFERENCES Campaign(id) ON DELETE SET NULL,
-                    agent_id VARCHAR(255),
-                    integration_id VARCHAR(255),
-                    event_type VARCHAR(100) NOT NULL,
-                    event_data JSONB DEFAULT '{}'::jsonb,
-                    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-                    created_by VARCHAR(255)
-                );
-            """)
-            logger.info("✓ Created lead_events table")
-
-            # 6. Nurturing campaigns table
-            await conn.execute("""
-                CREATE TABLE IF NOT EXISTS nurturing_campaigns (
-                    id VARCHAR(255) PRIMARY KEY,
-                    company_id VARCHAR(255) NOT NULL,
-                    name VARCHAR(255) NOT NULL,
-                    description TEXT,
-                    trigger VARCHAR(50) NOT NULL,
-                    schedule JSONB,
-                    steps JSONB NOT NULL,
-                    active BOOLEAN DEFAULT true,
-                    sales_campaign_id VARCHAR(255) REFERENCES Campaign(id) ON DELETE SET NULL,
-                    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-                    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-                    created_by VARCHAR(255)
-                );
-            """)
-            logger.info("✓ Created nurturing_campaigns table")
-
-            # Create indexes
-            await create_indexes(conn)
-            
-            logger.info("\n✅ All tables recreated successfully with correct schema!")
-            
-        except Exception as e:
-            logger.error(f"Error recreating tables: {e}")
-            raise
-
-async def create_indexes(conn):
-    """Create indexes for the tables"""
-    indexes = [
-        "CREATE INDEX IF NOT EXISTS idx_leads_company_id ON leads(company_id)",
-        "CREATE INDEX IF NOT EXISTS idx_leads_email ON leads(company_id, LOWER(email))",
-        "CREATE INDEX IF NOT EXISTS idx_leads_status ON leads(status)",
-        "CREATE INDEX IF NOT EXISTS idx_leads_source ON leads(source)",
-        "CREATE INDEX IF NOT EXISTS idx_leads_priority ON leads(priority)",
-        "CREATE INDEX IF NOT EXISTS idx_leads_score ON leads(score)",
-        "CREATE INDEX IF NOT EXISTS idx_leads_assigned_to ON leads(assigned_to)",
-        "CREATE INDEX IF NOT EXISTS idx_leads_created_at ON leads(created_at DESC)",
+        # Find all columns with UUID type in your script-related tables
+        query = """
+        SELECT 
+            c.table_name,
+            c.column_name,
+            c.data_type,
+            c.udt_name
+        FROM information_schema.columns c
+        WHERE c.table_schema = 'public'
+        AND c.udt_name = 'uuid'
+        AND (
+            c.table_name LIKE 'script%'
+            OR c.table_name IN ('leads', 'users', 'companies')
+        )
+        ORDER BY c.table_name, c.column_name
+        """
         
-        "CREATE INDEX IF NOT EXISTS idx_campaign_leads_campaign ON campaign_leads(campaign_id)",
-        "CREATE INDEX IF NOT EXISTS idx_campaign_leads_lead ON campaign_leads(lead_id)",
-        "CREATE INDEX IF NOT EXISTS idx_campaign_leads_status ON campaign_leads(campaign_status)",
+        results = await conn.fetch(query)
         
-        "CREATE INDEX IF NOT EXISTS idx_lead_events_lead_id ON lead_events(lead_id)",
-        "CREATE INDEX IF NOT EXISTS idx_lead_events_campaign_id ON lead_events(campaign_id)",
-        "CREATE INDEX IF NOT EXISTS idx_lead_events_type ON lead_events(event_type)",
-    ]
+        tables_to_fix = {}
+        for row in results:
+            table = row['table_name']
+            column = row['column_name']
+            
+            if table not in tables_to_fix:
+                tables_to_fix[table] = []
+            tables_to_fix[table].append(column)
+        
+        return tables_to_fix
     
-    for index in indexes:
-        await conn.execute(index)
+    async def get_dependent_views(self, conn: asyncpg.Connection, tables: List[str]) -> None:
+        """Get all views that depend on the tables we're modifying"""
+        
+        if not tables:
+            return
+            
+        table_list = "', '".join(tables)
+        query = f"""
+        SELECT DISTINCT 
+            c.relname as table_name,
+            v.relname as view_name,
+            pg_get_viewdef(v.oid, true) as view_definition
+        FROM pg_class c
+        JOIN pg_depend d ON c.oid = d.refobjid
+        JOIN pg_rewrite r ON d.objid = r.oid
+        JOIN pg_class v ON r.ev_class = v.oid
+        WHERE c.relname IN ('{table_list}')
+        AND c.relkind = 'r'
+        AND v.relkind IN ('v', 'm')  -- Include both views and materialized views
+        AND d.deptype = 'n'
+        """
+        
+        results = await conn.fetch(query)
+        
+        for row in results:
+            view = row['view_name']
+            definition = row['view_definition']
+            
+            if view not in self.views_to_drop:
+                self.views_to_drop.append(view)
+                self.view_definitions[view] = definition
     
-    logger.info("✓ Created all indexes")
-
-async def migrate_campaign_leads():
-    """Migrate Campaign_Lead data to new structure"""
-    async with await get_db_connection() as conn:
+    async def get_foreign_key_constraints(self, conn: asyncpg.Connection, tables_to_fix: Dict[str, List[str]]) -> None:
+        """Get all foreign key constraints that reference UUID columns"""
+        
+        for table, columns in tables_to_fix.items():
+            for column in columns:
+                query = """
+                SELECT 
+                    tc.constraint_name,
+                    tc.table_name,
+                    kcu.column_name,
+                    ccu.table_name AS foreign_table_name,
+                    ccu.column_name AS foreign_column_name,
+                    rc.update_rule,
+                    rc.delete_rule
+                FROM information_schema.table_constraints AS tc 
+                JOIN information_schema.key_column_usage AS kcu
+                    ON tc.constraint_name = kcu.constraint_name
+                    AND tc.table_schema = kcu.table_schema
+                JOIN information_schema.constraint_column_usage AS ccu
+                    ON ccu.constraint_name = tc.constraint_name
+                    AND ccu.table_schema = tc.table_schema
+                JOIN information_schema.referential_constraints AS rc
+                    ON tc.constraint_name = rc.constraint_name
+                    AND tc.table_schema = rc.constraint_schema
+                WHERE tc.constraint_type = 'FOREIGN KEY' 
+                    AND tc.table_schema = 'public'
+                    AND (
+                        (tc.table_name = $1 AND kcu.column_name = $2)
+                        OR (ccu.table_name = $1 AND ccu.column_name = $2)
+                    )
+                """
+                
+                constraints = await conn.fetch(query, table, column)
+                
+                for constraint in constraints:
+                    self.constraints_to_restore.append({
+                        'name': constraint['constraint_name'],
+                        'table': constraint['table_name'],
+                        'column': constraint['column_name'],
+                        'foreign_table': constraint['foreign_table_name'],
+                        'foreign_column': constraint['foreign_column_name'],
+                        'update_rule': constraint['update_rule'],
+                        'delete_rule': constraint['delete_rule']
+                    })
+    
+    async def drop_constraints(self, conn: asyncpg.Connection):
+        """Drop foreign key constraints"""
+        dropped_constraints = set()
+        
+        for constraint in self.constraints_to_restore:
+            if constraint['name'] not in dropped_constraints:
+                try:
+                    await conn.execute(f"""
+                        ALTER TABLE {constraint['table']} 
+                        DROP CONSTRAINT IF EXISTS {constraint['name']}
+                    """)
+                    dropped_constraints.add(constraint['name'])
+                    logger.info(f"  ✓ Dropped constraint: {constraint['name']}")
+                except Exception as e:
+                    logger.warning(f"  ⚠ Could not drop constraint {constraint['name']}: {e}")
+    
+    async def restore_constraints(self, conn: asyncpg.Connection):
+        """Restore foreign key constraints"""
+        restored_constraints = set()
+        
+        for constraint in self.constraints_to_restore:
+            if constraint['name'] not in restored_constraints:
+                try:
+                    await conn.execute(f"""
+                        ALTER TABLE {constraint['table']} 
+                        ADD CONSTRAINT {constraint['name']} 
+                        FOREIGN KEY ({constraint['column']}) 
+                        REFERENCES {constraint['foreign_table']}({constraint['foreign_column']})
+                        ON UPDATE {constraint['update_rule']}
+                        ON DELETE {constraint['delete_rule']}
+                    """)
+                    restored_constraints.add(constraint['name'])
+                    logger.info(f"  ✓ Restored constraint: {constraint['name']}")
+                except Exception as e:
+                    logger.warning(f"  ⚠ Could not restore constraint {constraint['name']}: {e}")
+    
+    async def drop_views(self, conn: asyncpg.Connection):
+        """Drop all dependent views"""
+        for view in self.views_to_drop:
+            try:
+                # Check if it's a materialized view
+                is_materialized = await conn.fetchval("""
+                    SELECT relkind = 'm' FROM pg_class WHERE relname = $1
+                """, view)
+                
+                if is_materialized:
+                    await conn.execute(f"DROP MATERIALIZED VIEW IF EXISTS {view} CASCADE")
+                    logger.info(f"  ✓ Dropped materialized view: {view}")
+                else:
+                    await conn.execute(f"DROP VIEW IF EXISTS {view} CASCADE")
+                    logger.info(f"  ✓ Dropped view: {view}")
+            except Exception as e:
+                logger.error(f"  ❌ Failed to drop view {view}: {e}")
+    
+    async def recreate_views(self, conn: asyncpg.Connection):
+        """Recreate the views after column conversion"""
+        for view_name, definition in self.view_definitions.items():
+            try:
+                # Check if it was a materialized view
+                was_materialized = 'MATERIALIZED VIEW' in definition.upper()
+                
+                if was_materialized:
+                    # Clean up the definition for materialized views
+                    definition = definition.replace('::uuid', '::varchar')
+                    await conn.execute(f"CREATE MATERIALIZED VIEW {view_name} AS {definition}")
+                    logger.info(f"  ✓ Recreated materialized view: {view_name}")
+                else:
+                    # Regular view
+                    definition = definition.replace('::uuid', '::varchar')
+                    await conn.execute(f"CREATE VIEW {view_name} AS {definition}")
+                    logger.info(f"  ✓ Recreated view: {view_name}")
+            except Exception as e:
+                logger.error(f"  ❌ Failed to recreate view {view_name}: {e}")
+    
+    async def convert_columns(self, conn: asyncpg.Connection, tables_to_fix: Dict[str, List[str]]):
+        """Convert UUID columns to VARCHAR"""
+        
+        for table, columns in tables_to_fix.items():
+            for column in columns:
+                try:
+                    # Drop any indexes on the column
+                    await conn.execute(f"""
+                        DROP INDEX IF EXISTS idx_{table}_{column}
+                    """)
+                    
+                    # Convert the column
+                    await conn.execute(f"""
+                        ALTER TABLE {table} 
+                        ALTER COLUMN {column} TYPE VARCHAR(50) 
+                        USING {column}::text
+                    """)
+                    
+                    logger.info(f"  ✓ Converted {table}.{column} to VARCHAR(50)")
+                    
+                    # Recreate the index
+                    await conn.execute(f"""
+                        CREATE INDEX IF NOT EXISTS idx_{table}_{column} 
+                        ON {table}({column})
+                    """)
+                    
+                except Exception as e:
+                    logger.error(f"  ❌ Failed to convert {table}.{column}: {e}")
+                    raise
+    
+    async def verify_changes(self, conn: asyncpg.Connection, tables_to_fix: Dict[str, List[str]]) -> bool:
+        """Verify all columns are now VARCHAR"""
+        
+        all_good = True
+        logger.info("\n📊 Verification Results:")
+        logger.info("-" * 60)
+        
+        for table, columns in tables_to_fix.items():
+            for column in columns:
+                result = await conn.fetchrow("""
+                    SELECT data_type, udt_name
+                    FROM information_schema.columns
+                    WHERE table_schema = 'public'
+                    AND table_name = $1
+                    AND column_name = $2
+                """, table, column)
+                
+                if result:
+                    is_varchar = result['data_type'] == 'character varying'
+                    status = "✅" if is_varchar else "❌"
+                    logger.info(f"{status} {table}.{column}: {result['data_type']}")
+                    
+                    if not is_varchar:
+                        all_good = False
+                else:
+                    logger.warning(f"⚠️  {table}.{column}: Column not found")
+                    all_good = False
+        
+        return all_good
+    
+    async def run(self):
+        """Execute the complete migration"""
+        conn = await asyncpg.connect(self.connection_string)
+        
         try:
+            logger.info("🚀 Starting Comprehensive Database Schema Fix")
+            logger.info("=" * 60)
+            
+            # 1. Analyze all tables
+            logger.info("\n🔍 Analyzing database schema...")
+            tables_to_fix = await self.analyze_all_tables(conn)
+            
+            if not tables_to_fix:
+                logger.info("✅ No UUID columns found that need conversion!")
+                return
+            
+            logger.info(f"\nFound {sum(len(cols) for cols in tables_to_fix.values())} columns to convert:")
+            for table, columns in tables_to_fix.items():
+                for column in columns:
+                    logger.info(f"  - {table}.{column}")
+            
+            # Start transaction
             async with conn.transaction():
-                logger.info("\nMigrating Campaign_Lead data...")
+                # 2. Get dependent views
+                logger.info("\n📝 Finding dependent views...")
+                await self.get_dependent_views(conn, list(tables_to_fix.keys()))
                 
-                # Get all campaigns
-                campaigns = await conn.fetch("SELECT id, company_id FROM Campaign")
+                if self.views_to_drop:
+                    logger.info(f"Found {len(self.views_to_drop)} dependent views")
                 
-                total_migrated = 0
-                total_associations = 0
+                # 3. Get foreign key constraints
+                logger.info("\n📝 Finding foreign key constraints...")
+                await self.get_foreign_key_constraints(conn, tables_to_fix)
                 
-                for campaign in campaigns:
-                    campaign_id = campaign['id']
-                    company_id = campaign['company_id']
-                    
-                    # Get leads from Campaign_Lead
-                    campaign_leads = await conn.fetch("""
-                        SELECT * FROM Campaign_Lead WHERE campaign_id = $1
-                    """, campaign_id)
-                    
-                    for lead in campaign_leads:
-                        if not lead['email']:
-                            continue
-                        
-                        # Generate new lead ID
-                        lead_id = f"LEAD-{lead['id'].split('-')[1]}" if 'LEAD-' in lead['id'] else f"LEAD-{lead['id'][:8].upper()}"
-                        
-                        # Check if lead exists
-                        existing = await conn.fetchrow("""
-                            SELECT id FROM leads 
-                            WHERE company_id = $1 AND LOWER(email) = LOWER($2)
-                        """, company_id, lead['email'])
-                        
-                        if not existing:
-                            # Insert into leads table
-                            await conn.execute("""
-                                INSERT INTO leads (
-                                    id, company_id, email, first_name, last_name, 
-                                    phone, lead_company, custom_fields, source, status,
-                                    created_at, updated_at
-                                ) VALUES (
-                                    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12
-                                ) ON CONFLICT (company_id, email) DO NOTHING
-                            """,
-                                lead_id, company_id, lead['email'].lower(),
-                                lead['first_name'], lead['last_name'],
-                                lead['phone'], lead['company'],
-                                lead['custom_fields'], 'campaign_import', 'new',
-                                lead['created_at'], lead['updated_at']
-                            )
-                            total_migrated += 1
-                        else:
-                            lead_id = existing['id']
-                        
-                        # Create campaign association
-                        assoc_id = f"CL-{campaign_id[-8:]}-{lead_id[-8:]}"
-                        existing_assoc = await conn.fetchrow("""
-                            SELECT id FROM campaign_leads 
-                            WHERE campaign_id = $1 AND lead_id = $2
-                        """, campaign_id, lead_id)
-                        
-                        if not existing_assoc:
-                            await conn.execute("""
-                                INSERT INTO campaign_leads (
-                                    id, campaign_id, lead_id, campaign_status,
-                                    call_attempts, last_call_at, campaign_custom_fields,
-                                    added_to_campaign_at
-                                ) VALUES (
-                                    $1, $2, $3, $4, $5, $6, $7, $8
-                                ) ON CONFLICT (campaign_id, lead_id) DO NOTHING
-                            """,
-                                assoc_id, campaign_id, lead_id,
-                                lead.get('status', 'pending'),
-                                lead.get('call_attempts', 0),
-                                lead.get('last_call_at'),
-                                lead.get('custom_fields', {}),
-                                lead['created_at']
-                            )
-                            total_associations += 1
+                if self.constraints_to_restore:
+                    logger.info(f"Found {len(self.constraints_to_restore)} foreign key constraints")
                 
-                logger.info(f"✅ Migration completed!")
-                logger.info(f"   - Leads migrated: {total_migrated}")
-                logger.info(f"   - Associations created: {total_associations}")
+                # 4. Drop constraints
+                if self.constraints_to_restore:
+                    logger.info("\n📝 Dropping foreign key constraints...")
+                    await self.drop_constraints(conn)
                 
+                # 5. Drop views
+                if self.views_to_drop:
+                    logger.info("\n📝 Dropping views...")
+                    await self.drop_views(conn)
+                
+                # 6. Convert columns
+                logger.info("\n📝 Converting columns to VARCHAR...")
+                await self.convert_columns(conn, tables_to_fix)
+                
+                # 7. Restore constraints
+                if self.constraints_to_restore:
+                    logger.info("\n📝 Restoring foreign key constraints...")
+                    await self.restore_constraints(conn)
+                
+                # 8. Recreate views
+                if self.views_to_drop:
+                    logger.info("\n📝 Recreating views...")
+                    await self.recreate_views(conn)
+            
+            # 9. Verify changes (outside transaction)
+            success = await self.verify_changes(conn, tables_to_fix)
+            
+            logger.info("\n" + "=" * 60)
+            if success:
+                logger.info("✅ SUCCESS: All columns converted successfully!")
+            else:
+                logger.info("⚠️  WARNING: Some columns may not have been converted")
+            
+            # 10. Test with sample string IDs
+            logger.info("\n🧪 Testing with string IDs...")
+            try:
+                # Test script_events table
+                test_id = f"TEST-{asyncio.get_event_loop().time():.0f}"
+                await conn.execute("""
+                    INSERT INTO script_events (id, script_id, event_type, event_data, created_by, created_at)
+                    VALUES ($1, $2, $3, $4, $5, NOW())
+                    ON CONFLICT (id) DO NOTHING
+                """, test_id, 'SCRIPT-TEST', 'test', '{}', 'user-test')
+                
+                # Clean up test data
+                await conn.execute("DELETE FROM script_events WHERE id = $1", test_id)
+                
+                logger.info("  ✅ String ID insertion test passed!")
+            except Exception as e:
+                logger.error(f"  ❌ String ID test failed: {e}")
+            
         except Exception as e:
-            logger.error(f"Migration failed: {e}")
+            logger.error(f"\n❌ ERROR: Migration failed: {e}")
             raise
+        finally:
+            await conn.close()
 
 async def main():
-    try:
-        # Check existing tables
-        exists, columns = await check_existing_tables()
-        
-        if exists:
-            logger.info("\n⚠️  Leads table already exists with incompatible schema")
-            response = input("Do you want to drop and recreate all lead management tables? (yes/no): ")
-            
-            if response.lower() == 'yes':
-                await drop_and_recreate_tables()
-                await migrate_campaign_leads()
-            else:
-                logger.info("Aborted. Please manually fix the schema or backup your data first.")
-        else:
-            logger.info("No existing leads table found. Creating fresh schema...")
-            await drop_and_recreate_tables()
-            await migrate_campaign_leads()
-            
-    except Exception as e:
-        logger.error(f"Failed: {e}")
-        raise
+    # Update with your database connection string
+    CONNECTION_STRING = "postgresql://username:password@localhost:5432/database_name"
+    
+    fixer = ComprehensiveSchemaFixer(CONNECTION_STRING)
+    await fixer.run()
 
 if __name__ == "__main__":
     asyncio.run(main())
