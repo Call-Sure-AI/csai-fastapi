@@ -10,7 +10,7 @@ from app.models.scripts import (
     ScriptValidation, ScriptValidationResult, ScriptAnalytics,
     ScriptPublishRequest, ScriptAnalyticsRequest, ScriptStatus, NodeType
 )
-
+from uuid import UUID
 from datetime import timedelta
 
 logger = logging.getLogger(__name__)
@@ -18,7 +18,7 @@ logger = logging.getLogger(__name__)
 class ScriptHandler:
     def __init__(self):
         pass
-    
+
     async def get_templates(self, category: Optional[str] = None, 
                            tags: Optional[List[str]] = None) -> List[ScriptTemplate]:
         """Get all available script templates"""
@@ -94,36 +94,27 @@ class ScriptHandler:
         template.updated_at = now
         
         return template
-    
-    async def get_script(self, script_id: str, company_id: str) -> Script:
-        """Get a specific script by ID"""
-        async with await get_db_connection() as conn:
-            result = await conn.fetchrow(
-                """
-                SELECT * FROM scripts 
-                WHERE id = $1 AND company_id = $2
-                """,
-                script_id,
-                company_id
-            )
+    def convert_uuids_to_strings(self, data: Dict[str, Any]) -> Dict[str, Any]:
+        """Convert any UUID values to strings in a dictionary"""
+        if not isinstance(data, dict):
+            return data
             
-            if not result:
-                raise HTTPException(status_code=404, detail="Script not found")
-            
-            script_dict = dict(result)
-            # Parse JSON fields
-            if script_dict.get('flow') and isinstance(script_dict['flow'], str):
-                script_dict['flow'] = json.loads(script_dict['flow'])
-            if script_dict.get('tags') and isinstance(script_dict['tags'], str):
-                script_dict['tags'] = json.loads(script_dict['tags'])
-            if script_dict.get('metadata') and isinstance(script_dict['metadata'], str):
-                script_dict['metadata'] = json.loads(script_dict['metadata'])
-            
-            # Convert flow dict to ScriptFlow object
-            if script_dict.get('flow'):
-                script_dict['flow'] = ScriptFlow(**script_dict['flow'])
-            
-            return Script(**script_dict)
+        result = {}
+        for key, value in data.items():
+            if isinstance(value, UUID):
+                result[key] = str(value)
+            elif isinstance(value, dict):
+                result[key] = self.convert_uuids_to_strings(value)
+            elif isinstance(value, list):
+                result[key] = [
+                    self.convert_uuids_to_strings(item) if isinstance(item, dict)
+                    else str(item) if isinstance(item, UUID)
+                    else item
+                    for item in value
+                ]
+            else:
+                result[key] = value
+        return result
     
     async def get_scripts(self, company_id: str, status: Optional[ScriptStatus] = None) -> List[Script]:
         """Get all scripts for a company"""
@@ -142,6 +133,10 @@ class ScriptHandler:
             result = []
             for script in scripts:
                 script_dict = dict(script)
+                
+                # Convert UUIDs to strings FIRST
+                script_dict = self.convert_uuids_to_strings(script_dict)
+                
                 # Parse JSON fields
                 if script_dict.get('flow') and isinstance(script_dict['flow'], str):
                     script_dict['flow'] = json.loads(script_dict['flow'])
@@ -158,10 +153,44 @@ class ScriptHandler:
             
             return result
     
+    async def get_script(self, script_id: str, company_id: str) -> Optional[Script]:
+        """Get a single script by ID"""
+        async with await get_db_connection() as conn:
+            script = await conn.fetchrow(
+                "SELECT * FROM scripts WHERE id = $1 AND company_id = $2",
+                script_id, company_id
+            )
+            
+            if not script:
+                return None
+            
+            script_dict = dict(script)
+            
+            # Convert UUIDs to strings
+            script_dict = self.convert_uuids_to_strings(script_dict)
+            
+            # Parse JSON fields
+            if script_dict.get('flow') and isinstance(script_dict['flow'], str):
+                script_dict['flow'] = json.loads(script_dict['flow'])
+            if script_dict.get('tags') and isinstance(script_dict['tags'], str):
+                script_dict['tags'] = json.loads(script_dict['tags'])
+            if script_dict.get('metadata') and isinstance(script_dict['metadata'], str):
+                script_dict['metadata'] = json.loads(script_dict['metadata'])
+            
+            # Convert flow dict to ScriptFlow object
+            if script_dict.get('flow'):
+                script_dict['flow'] = ScriptFlow(**script_dict['flow'])
+            
+            return Script(**script_dict)
+    
     async def create_script(self, script: Script, company_id: str, user_id: str) -> Script:
         """Create a new script"""
         script_id = f"SCRIPT-{str(uuid.uuid4())[:8].upper()}"
         now = datetime.utcnow()
+        
+        # Ensure company_id is a string
+        if isinstance(company_id, UUID):
+            company_id = str(company_id)
         
         async with await get_db_connection() as conn:
             await conn.execute(
@@ -205,6 +234,10 @@ class ScriptHandler:
     async def update_script(self, script_id: str, updates: Dict[str, Any], 
                            company_id: str, user_id: str) -> Script:
         """Update an existing script"""
+        # Ensure company_id is a string
+        if isinstance(company_id, UUID):
+            company_id = str(company_id)
+            
         async with await get_db_connection() as conn:
             # Check if script exists
             existing = await conn.fetchrow(
@@ -278,6 +311,10 @@ class ScriptHandler:
     async def publish_script(self, script_id: str, request: ScriptPublishRequest,
                             company_id: str, user_id: str) -> Dict[str, Any]:
         """Publish a script"""
+        # Ensure company_id is a string
+        if isinstance(company_id, UUID):
+            company_id = str(company_id)
+            
         async with await get_db_connection() as conn:
             # Get current script
             script = await conn.fetchrow(
@@ -351,6 +388,10 @@ class ScriptHandler:
     
     async def get_script_versions(self, script_id: str, company_id: str) -> List[ScriptVersion]:
         """Get all versions of a script"""
+        # Ensure company_id is a string
+        if isinstance(company_id, UUID):
+            company_id = str(company_id)
+            
         async with await get_db_connection() as conn:
             # Verify script belongs to company
             script = await conn.fetchrow(
@@ -373,6 +414,10 @@ class ScriptHandler:
             result = []
             for version in versions:
                 version_dict = dict(version)
+                
+                # Convert UUIDs to strings
+                version_dict = self.convert_uuids_to_strings(version_dict)
+                
                 # Parse flow JSON
                 if version_dict.get('flow') and isinstance(version_dict['flow'], str):
                     version_dict['flow'] = json.loads(version_dict['flow'])
@@ -385,8 +430,124 @@ class ScriptHandler:
             
             return result
     
+    async def get_script_analytics(self, script_id: str, request: ScriptAnalyticsRequest,
+                                  company_id: str) -> ScriptAnalytics:
+        """Get analytics for a script"""
+        # Ensure company_id is a string
+        if isinstance(company_id, UUID):
+            company_id = str(company_id)
+            
+        async with await get_db_connection() as conn:
+            # Verify script belongs to company
+            script = await conn.fetchrow(
+                "SELECT * FROM scripts WHERE id = $1 AND company_id = $2",
+                script_id, company_id
+            )
+            
+            if not script:
+                raise HTTPException(status_code=404, detail="Script not found")
+            
+            # Set date range
+            end_date = request.end_date or datetime.utcnow()
+            start_date = request.start_date or (end_date - timedelta(days=30))
+            
+            # Get execution metrics
+            executions = await conn.fetchrow(
+                """
+                SELECT 
+                    COUNT(*) as total_executions,
+                    COUNT(CASE WHEN status = 'completed' THEN 1 END) as successful_completions,
+                    AVG(EXTRACT(EPOCH FROM (completed_at - started_at))) as avg_duration_seconds
+                FROM script_executions
+                WHERE script_id = $1 
+                    AND started_at >= $2 
+                    AND started_at <= $3
+                """,
+                script_id, start_date, end_date
+            )
+            
+            # Get node-level analytics
+            node_analytics = await conn.fetch(
+                """
+                SELECT 
+                    node_id,
+                    COUNT(*) as visits,
+                    AVG(duration_ms) as avg_duration_ms,
+                    COUNT(CASE WHEN error_occurred THEN 1 END) as errors
+                FROM script_node_executions
+                WHERE script_id = $1 
+                    AND executed_at >= $2 
+                    AND executed_at <= $3
+                GROUP BY node_id
+                """,
+                script_id, start_date, end_date
+            )
+            
+            # Get drop-off points
+            drop_offs = await conn.fetch(
+                """
+                SELECT 
+                    last_node_id,
+                    COUNT(*) as count
+                FROM script_executions
+                WHERE script_id = $1 
+                    AND status = 'abandoned'
+                    AND started_at >= $2 
+                    AND started_at <= $3
+                GROUP BY last_node_id
+                ORDER BY count DESC
+                LIMIT 10
+                """,
+                script_id, start_date, end_date
+            )
+            
+            # Process node analytics
+            node_metrics = {}
+            for node in node_analytics:
+                node_dict = dict(node)
+                node_dict = self.convert_uuids_to_strings(node_dict)
+                
+                node_metrics[node_dict['node_id']] = {
+                    'visits': node_dict['visits'],
+                    'avg_duration_ms': float(node_dict['avg_duration_ms']) if node_dict['avg_duration_ms'] else 0,
+                    'errors': node_dict['errors'],
+                    'error_rate': (node_dict['errors'] / node_dict['visits'] * 100) if node_dict['visits'] > 0 else 0
+                }
+            
+            # Process drop-off points
+            drop_off_list = []
+            for drop in drop_offs:
+                drop_dict = dict(drop)
+                drop_dict = self.convert_uuids_to_strings(drop_dict)
+                drop_off_list.append({
+                    'node_id': drop_dict['last_node_id'],
+                    'count': drop_dict['count']
+                })
+            
+            # Convert execution metrics
+            exec_dict = dict(executions)
+            exec_dict = self.convert_uuids_to_strings(exec_dict)
+            
+            return ScriptAnalytics(
+                script_id=script_id,
+                total_executions=exec_dict['total_executions'] or 0,
+                successful_completions=exec_dict['successful_completions'] or 0,
+                average_duration_seconds=float(exec_dict['avg_duration_seconds']) if exec_dict['avg_duration_seconds'] else 0,
+                node_analytics=node_metrics,
+                drop_off_points=drop_off_list,
+                date_range={'start': start_date, 'end': end_date},
+                performance_metrics={
+                    'completion_rate': (exec_dict['successful_completions'] / exec_dict['total_executions'] * 100) 
+                                     if exec_dict['total_executions'] > 0 else 0,
+                    'abandonment_rate': ((exec_dict['total_executions'] - exec_dict['successful_completions']) / 
+                                       exec_dict['total_executions'] * 100) 
+                                      if exec_dict['total_executions'] > 0 else 0
+                }
+            )
+    
     async def validate_script(self, validation: ScriptValidation) -> ScriptValidationResult:
         """Validate a script flow"""
+        # This method doesn't interact with the database, so no UUID conversion needed
         errors = []
         warnings = []
         info = []
@@ -505,112 +666,14 @@ class ScriptHandler:
             info=info
         )
     
-    async def get_script_analytics(self, script_id: str, request: ScriptAnalyticsRequest,
-                                  company_id: str) -> ScriptAnalytics:
-        """Get analytics for a script"""
-        async with await get_db_connection() as conn:
-            # Verify script belongs to company
-            script = await conn.fetchrow(
-                "SELECT * FROM scripts WHERE id = $1 AND company_id = $2",
-                script_id, company_id
-            )
-            
-            if not script:
-                raise HTTPException(status_code=404, detail="Script not found")
-            
-            # Set date range
-            end_date = request.end_date or datetime.utcnow()
-            start_date = request.start_date or (end_date - timedelta(days=30))
-            
-            # Get execution metrics
-            executions = await conn.fetchrow(
-                """
-                SELECT 
-                    COUNT(*) as total_executions,
-                    COUNT(CASE WHEN status = 'completed' THEN 1 END) as successful_completions,
-                    AVG(EXTRACT(EPOCH FROM (completed_at - started_at))) as avg_duration_seconds
-                FROM script_executions
-                WHERE script_id = $1 
-                    AND started_at >= $2 
-                    AND started_at <= $3
-                """,
-                script_id, start_date, end_date
-            )
-            
-            # Get node-level analytics
-            node_analytics = await conn.fetch(
-                """
-                SELECT 
-                    node_id,
-                    COUNT(*) as visits,
-                    AVG(duration_ms) as avg_duration_ms,
-                    COUNT(CASE WHEN error_occurred THEN 1 END) as errors
-                FROM script_node_executions
-                WHERE script_id = $1 
-                    AND executed_at >= $2 
-                    AND executed_at <= $3
-                GROUP BY node_id
-                """,
-                script_id, start_date, end_date
-            )
-            
-            # Get drop-off points
-            drop_offs = await conn.fetch(
-                """
-                SELECT 
-                    last_node_id,
-                    COUNT(*) as count
-                FROM script_executions
-                WHERE script_id = $1 
-                    AND status = 'abandoned'
-                    AND started_at >= $2 
-                    AND started_at <= $3
-                GROUP BY last_node_id
-                ORDER BY count DESC
-                LIMIT 10
-                """,
-                script_id, start_date, end_date
-            )
-            
-            # Process node analytics
-            node_metrics = {}
-            for node in node_analytics:
-                node_metrics[node['node_id']] = {
-                    'visits': node['visits'],
-                    'avg_duration_ms': float(node['avg_duration_ms']) if node['avg_duration_ms'] else 0,
-                    'errors': node['errors'],
-                    'error_rate': (node['errors'] / node['visits'] * 100) if node['visits'] > 0 else 0
-                }
-            
-            # Process drop-off points
-            drop_off_list = []
-            for drop in drop_offs:
-                drop_off_list.append({
-                    'node_id': drop['last_node_id'],
-                    'count': drop['count']
-                })
-            
-            return ScriptAnalytics(
-                script_id=script_id,
-                total_executions=executions['total_executions'] or 0,
-                successful_completions=executions['successful_completions'] or 0,
-                average_duration_seconds=float(executions['avg_duration_seconds']) if executions['avg_duration_seconds'] else 0,
-                node_analytics=node_metrics,
-                drop_off_points=drop_off_list,
-                date_range={'start': start_date, 'end': end_date},
-                performance_metrics={
-                    'completion_rate': (executions['successful_completions'] / executions['total_executions'] * 100) 
-                                     if executions['total_executions'] > 0 else 0,
-                    'abandonment_rate': ((executions['total_executions'] - executions['successful_completions']) / 
-                                       executions['total_executions'] * 100) 
-                                      if executions['total_executions'] > 0 else 0
-                }
-            )
-    
     async def _create_version(self, conn, script_id: str, flow: ScriptFlow, 
                             version: int, user_id: str):
         """Create a new script version"""
         version_id = f"VER-{str(uuid.uuid4())[:8].upper()}"
+        
+        # Ensure user_id is a string
+        if isinstance(user_id, UUID):
+            user_id = str(user_id)
         
         await conn.execute(
             """

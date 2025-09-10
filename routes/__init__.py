@@ -16,6 +16,7 @@ from .integrations import router as integration_router
 from .bookings import router as booking_router
 from .notifications import router as notification_router
 from .leads import router as lead_router
+from .script import router as script_router
 
 # Create the main API router
 api_router = APIRouter()
@@ -39,6 +40,7 @@ api_router.include_router(integration_router, tags=["Integration"])
 api_router.include_router(booking_router, tags=["Booking"])
 api_router.include_router(notification_router, tags=["Notification"])
 api_router.include_router(lead_router, tags=["Lead"])
+api_router.include_router(script_router, tags=["Script"])
 
 # You can also create versioned API routers
 v1_router = APIRouter()
@@ -59,5 +61,6 @@ v1_router.include_router(integration_router, tags=["Integration"])
 v1_router.include_router(booking_router, tags=["Booking"])
 v1_router.include_router(notification_router, tags=["Notification"])
 v1_router.include_router(lead_router, tags=["Lead"])
+v1_router.include_router(script_router, tags=["Script"])
 
 __all__ = ["api_router", "v1_router"]
