@@ -2,6 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, B
 from fastapi.responses import StreamingResponse, JSONResponse
 from typing import List, Optional
 import uuid
+import asyncio
 import logging
 from datetime import datetime
 from middleware.auth_middleware import get_current_user_ws
@@ -112,8 +113,8 @@ async def create_campaign(
     data_mapping: str = Form(...),
     booking_config: str = Form(...),
     automation_config: str = Form(...),
+    agent_id: str | None = Form(None),  # Optional agent ID to assign to campaign
     leads_csv: UploadFile = File(...),
-
     current_user: UserResponse = Depends(get_current_user),
     company_handler: CompanyHandler = Depends(CompanyHandler),
 ):
@@ -129,27 +130,36 @@ async def create_campaign(
 
         import json
         try:
-            mapping_obj    = json.loads(data_mapping)
-            booking_obj    = json.loads(booking_config)
+            mapping_obj = json.loads(data_mapping)
+            booking_obj = json.loads(booking_config)
             automation_obj = json.loads(automation_config)
         except json.JSONDecodeError as e:
             raise HTTPException(400, f"Bad JSON: {e}")
 
         req = CreateCampaignRequest(
-            campaign_name = campaign_name,
-            description   = description,
-            data_mapping  = mapping_obj,
-            booking       = booking_obj,
-            automation    = automation_obj,
+            campaign_name=campaign_name,
+            description=description,
+            data_mapping=mapping_obj,
+            booking=booking_obj,
+            automation=automation_obj,
         )
 
-        service  = CampaignService()
+        service = CampaignService()
         campaign = await service.create_campaign(
-            campaign_request = req,
-            company_id       = company_id,
-            created_by       = current_user.id,
-            csv_content      = csv_text,
+            campaign_request=req,
+            company_id=company_id,
+            created_by=current_user.id,
+            csv_content=csv_text,
         )
+
+        # Assign agent if agent_id is provided
+        if agent_id:
+            try:
+                await service.assign_agents(campaign.id, [agent_id])
+                logger.info(f"Assigned agent {agent_id} to campaign {campaign.id}")
+            except Exception as e:
+                logger.error(f"Error assigning agent {agent_id} to campaign {campaign.id}: {e}")
+                # Continue without agent assignment - not a critical failure
 
         background_tasks.add_task(
             setup_campaign_automation,
