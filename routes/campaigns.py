@@ -157,6 +157,8 @@ async def create_campaign(
             try:
                 await service.assign_agents(campaign.id, [agent_id])
                 logger.info(f"Assigned agent {agent_id} to campaign {campaign.id}")
+                campaign = campaign.model_copy(update={"agent_id": agent_id})
+
             except Exception as e:
                 logger.error(f"Error assigning agent {agent_id} to campaign {campaign.id}: {e}")
                 # Continue without agent assignment - not a critical failure
