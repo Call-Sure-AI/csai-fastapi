@@ -23,6 +23,7 @@ from app.models.campaigns import CreateCampaignRequest, CampaignResponse, Update
 from middleware.auth_middleware import get_current_user
 from app.services.campaign_service import CampaignService
 from app.services.websocket_service import manager, WebSocketService
+from handlers.s3_handler import S3Handler
 import io, csv
 
 from routes.email import send_email_background
@@ -36,6 +37,7 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/campaigns", tags=["Campaigns"])
 
 svc  = CampaignService()
+s3_handler = S3Handler()
 
 @router.post("/{campaign_id}/start", status_code=200)
 async def start_campaign(
@@ -113,7 +115,7 @@ async def create_campaign(
     data_mapping: str = Form(...),
     booking_config: str = Form(...),
     automation_config: str = Form(...),
-    agent_id: str | None = Form(None),  # Optional agent ID to assign to campaign
+    agent_id: str | None = Form(None),
     leads_csv: UploadFile = File(...),
     current_user: UserResponse = Depends(get_current_user),
     company_handler: CompanyHandler = Depends(CompanyHandler),
@@ -126,8 +128,18 @@ async def create_campaign(
 
         if not leads_csv.filename.lower().endswith(".csv"):
             raise HTTPException(400, "File must be a CSV")
-        csv_text = (await leads_csv.read()).decode("utf-8")
 
+        upload_result = await s3_handler.upload_file(
+            file=leads_csv,
+            custom_key=f"campaigns/{company_id}/{campaign_name}-{uuid.uuid4().hex}.csv"
+        )
+        if not upload_result["success"]:
+            raise HTTPException(500, f"Failed to upload CSV to S3: {upload_result['error']}")
+        
+        s3_url = upload_result["url"]
+
+        csv_text = (await leads_csv.read()).decode("utf-8")
+        await leads_csv.seek(0)
         import json
         try:
             mapping_obj = json.loads(data_mapping)
@@ -142,6 +154,7 @@ async def create_campaign(
             data_mapping=mapping_obj,
             booking=booking_obj,
             automation=automation_obj,
+            leads_file_url=s3_url,
         )
 
         service = CampaignService()
@@ -150,18 +163,16 @@ async def create_campaign(
             company_id=company_id,
             created_by=current_user.id,
             csv_content=csv_text,
+            s3_url=s3_url,
         )
 
-        # Assign agent if agent_id is provided
         if agent_id:
             try:
                 await service.assign_agents(campaign.id, [agent_id])
                 logger.info(f"Assigned agent {agent_id} to campaign {campaign.id}")
                 campaign = campaign.model_copy(update={"agent_id": agent_id})
-
             except Exception as e:
                 logger.error(f"Error assigning agent {agent_id} to campaign {campaign.id}: {e}")
-                # Continue without agent assignment - not a critical failure
 
         background_tasks.add_task(
             setup_campaign_automation,
@@ -174,7 +185,6 @@ async def create_campaign(
     except Exception as e:
         logger.error(f"Error creating campaign: {e}")
         raise HTTPException(500, f"Failed to create campaign: {e}")
-
 
 
 @router.get("/company/{company_id}", response_model=List[CampaignResponse])

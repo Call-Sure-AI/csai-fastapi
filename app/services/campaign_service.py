@@ -56,22 +56,22 @@ class CampaignService:
         campaign_request: CreateCampaignRequest,
         company_id: str,
         created_by: str,
-        csv_content: str
+        csv_content: str,
+        s3_url: str # Add the s3_url parameter
     ) -> CampaignResponse:
-        
         try:
             campaign_id = f"CAMP-{str(uuid.uuid4())[:8].upper()}"
             now = datetime.utcnow()
 
             leads = await self._process_csv_leads(csv_content, campaign_request.data_mapping)
-            
+
             async with await get_db_connection() as conn:
                 campaign_query = """
                 INSERT INTO Campaign (
                     id, campaign_name, description, company_id, created_by, 
                     status, leads_count, data_mapping, booking_config, 
-                    automation_config, created_at, updated_at
-                ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+                    automation_config, leads_file_url, created_at, updated_at
+                ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
                 RETURNING *
                 """
                 
@@ -87,18 +87,20 @@ class CampaignService:
                     json.dumps([mapping.dict() for mapping in campaign_request.data_mapping]),
                     json.dumps(campaign_request.booking.dict()),
                     json.dumps(campaign_request.automation.dict()),
+                    s3_url, # Pass the S3 URL to the database
                     now,
                     now
                 )
 
                 if leads:
                     await self._create_campaign_leads(conn, campaign_id, leads)
-                
+
                 return self._to_campaign_response(dict(campaign_record))
-                
+
         except Exception as e:
             logger.error(f"Error creating campaign: {str(e)}")
             raise Exception(f"Failed to create campaign: {str(e)}")
+
 
     async def _process_csv_leads(
         self, 
