@@ -47,7 +47,8 @@ class CampaignResponse(BaseModel):
     created_by: str
     status: str
     leads_count: int
-    csv_file_path: Optional[str]
+    csv_file_path: Optional[str] # This field seems to be unused, you should remove it or rename it.
+    leads_file_url: Optional[str] # Add the new field for the S3 URL
     data_mapping: List[DataMapping]
     booking: CalendarBooking
     automation: AutomationSettings
@@ -71,9 +72,9 @@ class CampaignLead(BaseModel):
 class UpdateCampaignRequest(BaseModel):
     campaign_name: str | None = Field(None, max_length=255)
     description:   str | None = Field(None, max_length=1000)
-    data_mapping:   List[DataMapping] | None = None
-    booking:        CalendarBooking  | None = None
-    automation:     AutomationSettings | None = None
+    data_mapping:  List[DataMapping] | None = None
+    booking:       CalendarBooking  | None = None
+    automation:    AutomationSettings | None = None
     status:        str | None = None
 
 class AgentAssignRequest(BaseModel):
