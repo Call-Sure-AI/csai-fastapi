@@ -404,3 +404,49 @@ class S3Handler:
         else:
             result = await self.generate_presigned_url(key)
             return result.get('url', '') if result['success'] else ''
+
+    async def upload_bytes(
+        self,
+        file_bytes: bytes,
+        key: str,
+        content_type: str = 'application/octet-stream',
+        enable_public_read_access: bool = True
+    ) -> Dict[str, Any]:
+        try:
+            upload_params = {
+                'Bucket': self.bucket_name,
+                'Key': key,
+                'Body': file_bytes,
+                'ContentType': content_type
+            }
+
+            if enable_public_read_access:
+                upload_params['ACL'] = 'public-read'
+            
+            loop = asyncio.get_event_loop()
+            result = await loop.run_in_executor(
+                None, 
+                lambda: self.s3_client.put_object(**upload_params)
+            )
+
+            url = f"https://{self.bucket_name}.s3.{self.config.region}.amazonaws.com/{key}"
+            
+            return {
+                "success": True,
+                "key": key,
+                "url": url,
+                "data": {
+                    "etag": result.get('ETag'),
+                    "version_id": result.get('VersionId'),
+                    "size": len(file_bytes)
+                }
+            }
+        except NoCredentialsError:
+            logger.error("AWS credentials not found")
+            return {"success": False, "error": "AWS credentials not configured"}
+        except ClientError as e:
+            logger.error(f"S3 byte upload error: {e}")
+            return {"success": False, "error": str(e)}
+        except Exception as e:
+            logger.error(f"S3 byte upload error: {e}")
+            return {"success": False, "error": str(e)}

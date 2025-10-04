@@ -73,3 +73,11 @@ config = {
     'production': ProductionConfig,
     'default': DevelopmentConfig
 }
+
+class ElevenLabsConfig:
+    def __init__(self):
+        self.api_key = os.getenv('ELEVENLABS_API_KEY')
+        if not self.api_key:
+            raise ValueError("ELEVENLABS_API_KEY is not set in the environment.")
+
+elevenlabs_config = ElevenLabsConfig()
