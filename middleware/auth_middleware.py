@@ -57,7 +57,7 @@ async def get_current_user(
 
         query = 'SELECT * FROM "User" WHERE id = $1'
         user = await postgres_client.client.execute_query_one(query, (user_id,))
-        
+
         if not user:
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,

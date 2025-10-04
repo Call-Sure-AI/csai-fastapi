@@ -22,7 +22,10 @@ from app.models.schemas import (
 )
 from .email_handler import email_handler
 from app.db.repositories.otp_repository import otp_repository
+from config import config
 
+env = os.getenv('FLASK_ENV', 'development')
+app_config = config.get(env, config['default'])()
 
 class AuthHandler:
     
@@ -96,7 +99,7 @@ class AuthHandler:
                     'role': role,
                     'exp': datetime.utcnow() + timedelta(days=7)
                 },
-                os.getenv('JWT_SECRET', 'your-secret-key'),
+                app_config.JWT_SECRET,
                 algorithm='HS256'
             )
             
@@ -186,7 +189,7 @@ class AuthHandler:
                     'email': user['email'],
                     'exp': datetime.utcnow() + timedelta(days=1)
                 },
-                os.getenv('JWT_SECRET', 'your-secret-key'),
+                app_config.JWT_SECRET,
                 algorithm='HS256'
             )
             
@@ -290,7 +293,7 @@ class AuthHandler:
                 # Create user with OTP verification
                 jwt_token = jwt.encode(
                     {'email': otp_request.email}, 
-                    os.getenv('JWT_SECRET', 'secret-key'), 
+                    app_config.JWT_SECRET, 
                     algorithm='HS256'
                 )
                 
@@ -317,7 +320,7 @@ class AuthHandler:
                     'image': user.get('image'),
                     'exp': datetime.utcnow() + timedelta(days=7)
                 },
-                os.getenv('JWT_SECRET', 'your-secret-key'),
+                app_config.JWT_SECRET,
                 algorithm='HS256'
             )
             
@@ -382,7 +385,7 @@ class AuthHandler:
 
                 jwt_token = jwt.encode(
                     {'email': otp_request.email}, 
-                    os.getenv('JWT_SECRET', 'secret-key'), 
+                    app_config.JWT_SECRET, 
                     algorithm='HS256'
                 )
                 
@@ -407,7 +410,7 @@ class AuthHandler:
                     'image': user.get('image'),
                     'exp': datetime.utcnow() + timedelta(days=7)
                 },
-                os.getenv('JWT_SECRET', 'your-secret-key'),
+                app_config.JWT_SECRET,
                 algorithm='HS256'
             )
             
@@ -474,7 +477,7 @@ class AuthHandler:
                     'image': user.get('image'),
                     'exp': datetime.utcnow() + timedelta(days=7)
                 },
-                os.getenv('JWT_SECRET', 'your-secret-key'),
+                app_config.JWT_SECRET,
                 algorithm='HS256'
             )
             
