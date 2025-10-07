@@ -15,7 +15,7 @@ def get_agent_handler():
     """Dependency to get agent handler instance"""
     return AgentHandler()
 
-@router.get("/", response_model=List[Agent])
+@router.get("/all", response_model=List[Agent])
 async def get_all_agents(
     current_user: UserResponse = Depends(get_current_user),
     id: Optional[str] = Query(None, description="Specific agent ID to fetch"),
