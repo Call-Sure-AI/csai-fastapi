@@ -153,6 +153,25 @@ class AgentHandler:
             
             if existing_agents:
                 logger.info(f'Agent already exists with name "{agent_data.name}" for company ID "{agent_data.company_id}"')
+                # LOG ACTIVITY FOR DUPLICATE ATTEMPT - ADD THIS
+                try:
+                    activity_query = """
+                        INSERT INTO activities (user_id, action, entity_type, entity_id, metadata, created_at)
+                        VALUES ($1, $2, $3, $4, $5::jsonb, NOW())
+                    """
+                    activity_metadata = {
+                        'name': existing_agents[0]['name'],
+                        'type': 'duplicate_attempt',
+                        'company_id': agent_data.company_id
+                    }
+                    await self.db.execute_query_one(
+                        activity_query,
+                        (user_id, 'CREATE_DUPLICATE', 'AGENT', existing_agents[0]['id'], json.dumps(activity_metadata))
+                    )
+                    logger.info(f"Activity logged for duplicate agent attempt: {existing_agents[0]['id']}")
+                except Exception as log_error:
+                    logger.warning(f'Failed to log duplicate agent activity: {log_error}')
+            
                 return self._parse_json_fields(existing_agents[0])
 
             # Create new agent
@@ -223,7 +242,7 @@ class AgentHandler:
                 }
                 # Don't await this - let it run in background
                 try:
-                    await self.db.execute_insert(
+                    await self.db.execute_query_one(
                         activity_query,
                         (user_id, 'CREATE', 'AGENT', result['id'], json.dumps(activity_metadata))
                     )
