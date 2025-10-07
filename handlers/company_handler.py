@@ -36,7 +36,16 @@ class CompanyHandler:
                         company[field] = {} if field == 'prompt_templates' else None
                 elif company[field] == '':
                     company[field] = {} if field == 'prompt_templates' else None
+
+        # Clean URL fields
+        if 'website' in company:
+            if company['website'] in [None, 'None', '', 'null']:
+                company['website'] = None
         
+        if 'logo' in company:
+            if company['logo'] in [None, 'None', '', 'null']:
+                company['logo'] = None
+
         return company
 
 
