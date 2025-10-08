@@ -1,21 +1,18 @@
-from fastapi import APIRouter, HTTPException, Depends, Query, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, HTTPException, Depends, Query
 from typing import List, Optional, Dict, Any
+from datetime import datetime
 from app.models.schemas import UserResponse
 from handlers.conversation_handler import get_conversation_manager, ConversationManager
 from middleware.auth_middleware import get_current_user
 import logging
-import json
-from datetime import datetime
 
 logger = logging.getLogger(__name__)
 
-# Create router with correct prefix (matching agent.py pattern)
+
 router = APIRouter(prefix="/conversations", tags=["Conversation"])
 
 
-# Dependency to get conversation manager (matching agent.py pattern)
 def get_manager() -> ConversationManager:
-    """Dependency to get conversation manager instance"""
     return get_conversation_manager()
 
 
@@ -26,17 +23,14 @@ async def get_all_conversations(
     status: Optional[str] = Query(None, description="Filter by status"),
     manager: ConversationManager = Depends(get_manager)
 ):
-    """
-    Get all conversations for the current user
-    Uses get_current_user dependency like agent routes
-    """
+
     try:
         logger.info(f"get_all_conversations called by user: {current_user.id}")
         logger.info(f"current_user.id: {current_user.id}, type: {type(current_user.id)}")
         
         conversations = []
         for call_id, conv_data in manager.conversation_data.items():
-            # Apply filters
+
             if company_id and conv_data.get('company_id') != company_id:
                 continue
             if status and conv_data.get('status') != status:
@@ -61,7 +55,6 @@ async def get_all_conversations(
 
 @router.get("/test")
 async def test_conversation_router():
-    """Test endpoint to verify conversation router is working - NO AUTH REQUIRED"""
     return {
         "message": "Conversation router is working!",
         "status": "success"
@@ -72,7 +65,6 @@ async def test_conversation_router():
 async def test_manager(
     manager: ConversationManager = Depends(get_manager)
 ):
-    """Test conversation manager - NO AUTH REQUIRED"""
     try:
         active_count = len(manager.active_connections)
         conversation_count = len(manager.conversation_data)
@@ -90,12 +82,148 @@ async def test_manager(
         }
 
 
+@router.post("/create", status_code=201)
+async def create_conversation(
+    call_id: str = Query(..., description="Unique call ID"),
+    agent_id: str = Query(..., description="Agent ID"),
+    user_phone: Optional[str] = Query(None, description="User phone number"),
+    current_user: UserResponse = Depends(get_current_user),
+    manager: ConversationManager = Depends(get_manager)
+):
+
+    try:
+        logger.info(f"Creating conversation: call_id={call_id}, agent_id={agent_id}, user={current_user.id}")
+
+        if call_id in manager.conversation_data:
+            raise HTTPException(status_code=400, detail=f"Conversation {call_id} already exists")
+
+        manager.conversation_data[call_id] = {
+            'call_id': call_id,
+            'agent_id': agent_id,
+            'start_time': datetime.utcnow(),
+            'messages': [],
+            'transcript': '',
+            'user_phone': user_phone,
+            'status': 'active',
+            'created_by': current_user.id,
+            'created_by_name': current_user.name,
+            'company_id': None
+        }
+        
+        logger.info(f"Conversation {call_id} created successfully")
+        
+        return {
+            "status": "success",
+            "message": "Conversation created",
+            "conversation": {
+                "call_id": call_id,
+                "agent_id": agent_id,
+                "status": "active",
+                "user_phone": user_phone,
+                "created_by": current_user.name,
+                "start_time": manager.conversation_data[call_id]['start_time'].isoformat()
+            }
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error in create_conversation: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+
+@router.post("/{call_id}/message", status_code=201)
+async def add_message_to_conversation(
+    call_id: str,
+    message_type: str = Query(..., description="Message type: transcript_update, user_joined, agent_response"),
+    speaker: Optional[str] = Query(None, description="Speaker: agent or user"),
+    text: Optional[str] = Query(None, description="Message text"),
+    phone: Optional[str] = Query(None, description="User phone (for user_joined)"),
+    current_user: UserResponse = Depends(get_current_user),
+    manager: ConversationManager = Depends(get_manager)
+):
+
+    try:
+        logger.info(f"Adding message to conversation {call_id}: type={message_type}")
+        
+        if call_id not in manager.conversation_data:
+            raise HTTPException(status_code=404, detail=f"Conversation {call_id} not found")
+
+        message_data = {'type': message_type}
+        
+        if message_type == 'transcript_update':
+            if not text or not speaker:
+                raise HTTPException(status_code=400, detail="text and speaker required for transcript_update")
+            message_data['transcript'] = text
+            message_data['speaker'] = speaker
+            
+        elif message_type == 'user_joined':
+            if not phone:
+                raise HTTPException(status_code=400, detail="phone required for user_joined")
+            message_data['phone'] = phone
+            message_data['user_details'] = {}
+            
+        elif message_type == 'agent_response':
+            if not text:
+                raise HTTPException(status_code=400, detail="text required for agent_response")
+            message_data['response'] = text
+            message_data['action'] = 'send_message'
+
+        await manager.handle_message(call_id, message_data)
+        
+        return {
+            "status": "success",
+            "message": "Message added to conversation",
+            "call_id": call_id,
+            "message_type": message_type
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error in add_message_to_conversation: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+
+@router.post("/{call_id}/end", status_code=200)
+async def end_conversation_with_outcome(
+    call_id: str,
+    outcome: str = Query("completed", description="Outcome: completed, callback_requested, not_interested"),
+    current_user: UserResponse = Depends(get_current_user),
+    manager: ConversationManager = Depends(get_manager)
+):
+    try:
+        logger.info(f"Ending conversation {call_id} with outcome: {outcome}")
+        
+        if call_id not in manager.conversation_data:
+            raise HTTPException(status_code=404, detail=f"Conversation {call_id} not found")
+
+        message_data = {
+            'type': 'call_ended',
+            'outcome': outcome
+        }
+        
+        await manager.handle_message(call_id, message_data)
+        
+        return {
+            "status": "success",
+            "message": "Conversation ended",
+            "call_id": call_id,
+            "outcome": outcome
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error in end_conversation_with_outcome: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+
 @router.get("/active", response_model=List[Dict[str, Any]])
 async def get_active_conversations(
     current_user: UserResponse = Depends(get_current_user),
     manager: ConversationManager = Depends(get_manager)
 ):
-    """Get all currently active conversations"""
     try:
         logger.info(f"get_active_conversations called by user: {current_user.id}")
         
@@ -125,7 +253,6 @@ async def get_conversation_by_id(
     current_user: UserResponse = Depends(get_current_user),
     manager: ConversationManager = Depends(get_manager)
 ):
-    """Get a specific conversation by call ID"""
     try:
         logger.info(f"get_conversation_by_id called for call: {call_id} by user: {current_user.id}")
         
@@ -159,7 +286,6 @@ async def get_conversation_transcript(
     current_user: UserResponse = Depends(get_current_user),
     manager: ConversationManager = Depends(get_manager)
 ):
-    """Get the transcript of a specific conversation"""
     try:
         if call_id not in manager.conversation_data:
             raise HTTPException(status_code=404, detail=f"Conversation {call_id} not found")
@@ -187,14 +313,12 @@ async def broadcast_to_conversation(
     current_user: UserResponse = Depends(get_current_user),
     manager: ConversationManager = Depends(get_manager)
 ):
-    """Broadcast a message to a specific conversation"""
     try:
         logger.info(f"Broadcasting message to call: {call_id} by user: {current_user.id}")
         
         if call_id not in manager.active_connections:
             raise HTTPException(status_code=404, detail=f"Active connection for call {call_id} not found")
-        
-        # Add user context
+
         message['sent_by'] = {
             'id': current_user.id,
             'name': current_user.name,
@@ -222,15 +346,17 @@ async def end_conversation(
     current_user: UserResponse = Depends(get_current_user),
     manager: ConversationManager = Depends(get_manager)
 ):
-    """End a conversation"""
     try:
         logger.info(f"Ending conversation {call_id} by user: {current_user.id}")
         
-        if call_id not in manager.active_connections:
-            raise HTTPException(status_code=404, detail=f"Active conversation {call_id} not found")
-        
-        # Disconnect the conversation
-        manager.disconnect(call_id)
+        if call_id not in manager.conversation_data:
+            raise HTTPException(status_code=404, detail=f"Conversation {call_id} not found")
+
+        if call_id in manager.conversation_data:
+            del manager.conversation_data[call_id]
+
+        if call_id in manager.active_connections:
+            manager.disconnect(call_id)
         
         return None
         
