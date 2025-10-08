@@ -15,7 +15,6 @@ class ConversationManager:
     _instance = None
     
     def __new__(cls):
-        """Singleton pattern to ensure only one instance exists"""
         if cls._instance is None:
             cls._instance = super(ConversationManager, cls).__new__(cls)
         return cls._instance
@@ -50,7 +49,6 @@ class ConversationManager:
         logger.info(f"WebSocket connection closed for call {call_id}")
 
     async def send_message(self, call_id: str, message: dict):
-        """Send message to specific call connection"""
         if call_id in self.active_connections:
             websocket = self.active_connections[call_id]
             try:
@@ -60,7 +58,6 @@ class ConversationManager:
                 self.disconnect(call_id)
 
     async def broadcast_to_company(self, company_id: str, message: dict):
-        """Broadcast message to all monitoring connections for a company"""
         disconnected = []
         
         for key, websocket in self.monitoring_connections.items():
@@ -70,13 +67,11 @@ class ConversationManager:
                 except Exception as e:
                     logger.error(f"Failed to broadcast to {key}: {str(e)}")
                     disconnected.append(key)
-        
-        # Clean up disconnected monitors
+
         for key in disconnected:
             del self.monitoring_connections[key]
 
     async def broadcast_to_agents(self, message: dict):
-        """Broadcast to all active agent connections"""
         disconnected = []
         for call_id, websocket in self.active_connections.items():
             try:
@@ -117,14 +112,12 @@ class ConversationManager:
                 self.conversation_data[call_id]['agent_id']
             )
 
-            # Send to specific call
             await self.send_message(call_id, {
                 'type': 'user_joined',
                 'phone': message_data.get('phone'),
                 'user_details': message_data.get('user_details', {})
             })
-            
-            # Broadcast to company monitors if company_id exists
+
             if 'company_id' in message_data:
                 await self.broadcast_to_company(message_data['company_id'], {
                     'type': 'call_started',
@@ -211,8 +204,7 @@ class ConversationManager:
             'duration': duration,
             'extracted_details': extracted_details
         })
-        
-        # Broadcast to company monitors
+
         if 'company_id' in conversation:
             await self.broadcast_to_company(conversation['company_id'], {
                 'type': 'call_ended',
@@ -275,7 +267,6 @@ class ConversationManager:
         
         return extracted
 
-# Global singleton instance
 conversation_manager = None
 
 def get_conversation_manager() -> ConversationManager:

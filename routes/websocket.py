@@ -7,13 +7,11 @@ from datetime import datetime
 
 logger = logging.getLogger(__name__)
 
-# Create router with correct prefix (matching agent.py pattern)
+
 router = APIRouter(prefix="/ws", tags=["WebSocket"])
 
 
-# Dependency to get conversation manager (matching agent.py pattern)
 def get_manager():
-    """Dependency to get conversation manager instance"""
     return get_conversation_manager()
 
 
@@ -24,23 +22,16 @@ async def conversation_websocket(
     agent_id: str = Query(..., description="Agent ID for the conversation"),
     token: str = Query(..., description="JWT authentication token")
 ):
-    """
-    WebSocket endpoint for real-time conversation handling
-    Uses get_current_user_ws for authentication (WebSocket equivalent of get_current_user)
-    """
+
     manager = get_manager()
     current_user = None
     
     try:
-        # Authenticate user using get_current_user_ws (WebSocket version)
         logger.info(f"Authenticating WebSocket for call {call_id}")
         current_user = await get_current_user_ws(websocket, token)
         logger.info(f"User {current_user.id} ({current_user.email}) authenticated for call {call_id}")
-        
-        # Connect to conversation
+
         await manager.connect(websocket, call_id, agent_id)
-        
-        # Send connection confirmation with user details
         await manager.send_message(call_id, {
             'type': 'connection_established',
             'call_id': call_id,
@@ -55,21 +46,18 @@ async def conversation_websocket(
         })
         
         logger.info(f"WebSocket connected: call={call_id}, user={current_user.id}")
-        
-        # Handle incoming messages
+
         while True:
             try:
                 data = await websocket.receive_text()
                 message_data = json.loads(data)
-                
-                # Add user context to message (like we have current_user in HTTP routes)
+
                 message_data['user_id'] = current_user.id
                 message_data['user_email'] = current_user.email
                 message_data['user_name'] = current_user.name
                 
                 logger.debug(f"Message from {current_user.email}: {message_data.get('type')}")
-                
-                # Process message
+
                 await manager.handle_message(call_id, message_data)
                 
             except json.JSONDecodeError as e:
@@ -100,28 +88,21 @@ async def monitor_websocket(
     company_id: str,
     token: str = Query(..., description="JWT authentication token")
 ):
-    """
-    WebSocket endpoint for monitoring company conversations
-    Uses get_current_user_ws for authentication
-    """
+
     manager = get_manager()
     monitoring_key = None
     current_user = None
     
     try:
-        # Authenticate user using get_current_user_ws
         logger.info(f"Authenticating monitor for company {company_id}")
         current_user = await get_current_user_ws(websocket, token)
         logger.info(f"User {current_user.id} (role: {current_user.role}) authenticated for monitoring {company_id}")
-        
-        # Accept connection after authentication
+
         await websocket.accept()
         
-        # Add to monitoring connections
         monitoring_key = f"monitor_{company_id}_{current_user.id}"
         manager.monitoring_connections[monitoring_key] = websocket
-        
-        # Send connection confirmation
+
         await websocket.send_json({
             'type': 'monitor_connected',
             'company_id': company_id,
@@ -135,8 +116,7 @@ async def monitor_websocket(
         })
         
         logger.info(f"Monitor connected: {monitoring_key}")
-        
-        # Handle commands
+
         while True:
             try:
                 data = await websocket.receive_text()
@@ -198,23 +178,19 @@ async def analytics_websocket(
     company_id: str,
     token: str = Query(..., description="JWT authentication token")
 ):
-    """WebSocket endpoint for real-time analytics updates"""
     connection_key = None
     manager = get_manager()
     current_user = None
     
     try:
-        # Authenticate user
         current_user = await get_current_user_ws(websocket, token)
         logger.info(f"User {current_user.id} authenticated for analytics {company_id}")
-        
-        # Accept connection
+
         await websocket.accept()
         
         connection_key = f"analytics_{company_id}_{current_user.id}"
         manager.active_connections[connection_key] = websocket
-        
-        # Send confirmation
+
         await websocket.send_json({
             'type': 'analytics_connected',
             'company_id': company_id,
@@ -226,8 +202,7 @@ async def analytics_websocket(
         })
         
         logger.info(f"Analytics connected: {connection_key}")
-        
-        # Handle commands
+
         while True:
             try:
                 data = await websocket.receive_text()
@@ -268,30 +243,25 @@ async def notifications_websocket(
     user_id: str,
     token: str = Query(..., description="JWT authentication token")
 ):
-    """WebSocket endpoint for real-time user notifications"""
     connection_key = None
     manager = get_manager()
     current_user = None
     
     try:
-        # Authenticate user
         current_user = await get_current_user_ws(websocket, token)
-        
-        # Verify user is requesting their own notifications
+
         if current_user.id != user_id:
             logger.warning(f"User {current_user.id} attempted to access notifications for {user_id}")
             await websocket.close(code=1008, reason="Unauthorized: Can only access own notifications")
             return
         
         logger.info(f"User {current_user.id} authenticated for notifications")
-        
-        # Accept connection
+
         await websocket.accept()
         
         connection_key = f"notifications_{user_id}"
         manager.active_connections[connection_key] = websocket
-        
-        # Send confirmation
+
         await websocket.send_json({
             'type': 'notifications_connected',
             'user': {
@@ -302,8 +272,7 @@ async def notifications_websocket(
         })
         
         logger.info(f"Notifications connected: {connection_key}")
-        
-        # Handle commands
+
         while True:
             try:
                 data = await websocket.receive_text()
@@ -343,7 +312,6 @@ async def notifications_websocket(
 
 @router.get("/test")
 async def test_websocket_router():
-    """Test endpoint to verify WebSocket router is working - NO AUTH REQUIRED"""
     return {
         "message": "WebSocket router is working!",
         "status": "success",
