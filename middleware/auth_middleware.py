@@ -24,15 +24,39 @@ async def get_current_user_ws(websocket: WebSocket, token: str) -> UserResponse:
         payload = jwt.decode(token, app_config.JWT_SECRET, algorithms=["HS256"])
         
         user_id = payload.get("id")
-        email = payload.get("email")
         
-        if user_id is None or email is None:
-            raise InvalidTokenError("Invalid token payload")
-            
-        return UserResponse(id=user_id, email=email)
+        if user_id is None:
+            raise InvalidTokenError("Invalid token payload: missing user id")
+
+        query = 'SELECT * FROM "User" WHERE id = $1'
+        user = await postgres_client.client.execute_query_one(query, (user_id,))
         
+        if not user:
+            raise InvalidTokenError("User not found")
+
+        role = await get_user_role(user_id)
+        
+        logger.info(f"WebSocket authenticated: user_id={user_id}, email={user['email']}, role={role}")
+        
+        return UserResponse(
+            id=str(user['id']),
+            name=user['name'],
+            email=user['email'],
+            image=user.get('image'),
+            role=role
+        )
+        
+    except ExpiredSignatureError as e:
+        logger.warning(f"WebSocket auth failed: Token expired")
+        await websocket.close(code=1008, reason="Authentication failed: Token expired")
+        raise
     except InvalidTokenError as e:
+        logger.warning(f"WebSocket auth failed: {str(e)}")
         await websocket.close(code=1008, reason=f"Authentication failed: {str(e)}")
+        raise
+    except Exception as e:
+        logger.error(f"WebSocket auth error: {e}", exc_info=True)
+        await websocket.close(code=1008, reason="Authentication failed")
         raise
 
 async def get_current_user(

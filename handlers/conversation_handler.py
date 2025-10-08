@@ -12,10 +12,21 @@ from app.db.postgres_client import get_db_connection
 logger = logging.getLogger(__name__)
 
 class ConversationManager:
+    _instance = None
+    
+    def __new__(cls):
+        """Singleton pattern to ensure only one instance exists"""
+        if cls._instance is None:
+            cls._instance = super(ConversationManager, cls).__new__(cls)
+        return cls._instance
+    
     def __init__(self):
-        self.active_connections: Dict[str, Any] = {}
-        self.conversation_data: Dict[str, Dict] = {}
-        self.analytics_handler = AnalyticsHandler()
+        if not hasattr(self, 'initialized'):
+            self.active_connections: Dict[str, Any] = {}
+            self.conversation_data: Dict[str, Dict] = {}
+            self.monitoring_connections: Dict[str, Any] = {}
+            self.analytics_handler = AnalyticsHandler()
+            self.initialized = True
 
     async def connect(self, websocket, call_id: str, agent_id: str):
         await websocket.accept()
@@ -39,11 +50,33 @@ class ConversationManager:
         logger.info(f"WebSocket connection closed for call {call_id}")
 
     async def send_message(self, call_id: str, message: dict):
+        """Send message to specific call connection"""
         if call_id in self.active_connections:
             websocket = self.active_connections[call_id]
-            await websocket.send_text(json.dumps(message))
+            try:
+                await websocket.send_text(json.dumps(message))
+            except Exception as e:
+                logger.error(f"Failed to send message to {call_id}: {str(e)}")
+                self.disconnect(call_id)
+
+    async def broadcast_to_company(self, company_id: str, message: dict):
+        """Broadcast message to all monitoring connections for a company"""
+        disconnected = []
+        
+        for key, websocket in self.monitoring_connections.items():
+            if key.startswith(f"monitor_{company_id}_"):
+                try:
+                    await websocket.send_text(json.dumps(message))
+                except Exception as e:
+                    logger.error(f"Failed to broadcast to {key}: {str(e)}")
+                    disconnected.append(key)
+        
+        # Clean up disconnected monitors
+        for key in disconnected:
+            del self.monitoring_connections[key]
 
     async def broadcast_to_agents(self, message: dict):
+        """Broadcast to all active agent connections"""
         disconnected = []
         for call_id, websocket in self.active_connections.items():
             try:
@@ -84,11 +117,21 @@ class ConversationManager:
                 self.conversation_data[call_id]['agent_id']
             )
 
+            # Send to specific call
             await self.send_message(call_id, {
                 'type': 'user_joined',
                 'phone': message_data.get('phone'),
                 'user_details': message_data.get('user_details', {})
             })
+            
+            # Broadcast to company monitors if company_id exists
+            if 'company_id' in message_data:
+                await self.broadcast_to_company(message_data['company_id'], {
+                    'type': 'call_started',
+                    'call_id': call_id,
+                    'phone': message_data.get('phone'),
+                    'agent_id': self.conversation_data[call_id]['agent_id']
+                })
 
     async def _handle_transcript_update(self, call_id: str, message_data: dict):
         if call_id in self.conversation_data:
@@ -168,6 +211,16 @@ class ConversationManager:
             'duration': duration,
             'extracted_details': extracted_details
         })
+        
+        # Broadcast to company monitors
+        if 'company_id' in conversation:
+            await self.broadcast_to_company(conversation['company_id'], {
+                'type': 'call_ended',
+                'call_id': call_id,
+                'outcome': outcome,
+                'duration': duration,
+                'lead_score': lead_score
+            })
 
         del self.conversation_data[call_id]
 
@@ -222,7 +275,7 @@ class ConversationManager:
         
         return extracted
 
-
+# Global singleton instance
 conversation_manager = None
 
 def get_conversation_manager() -> ConversationManager:
