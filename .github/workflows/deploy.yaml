@@ -63,6 +63,9 @@ jobs:
               docker pull ${{ secrets.DOCKERHUB_USERNAME }}/callsure-ai-backend:${{ github.sha }}
               docker stop callsure-ai-backend || true
               docker rm callsure-ai-backend || true
+
+              docker image prune -a --filter "until=168h"
+              
               docker run -d \
                 -p 8000:8000 \
                 --name callsure-ai-backend \
