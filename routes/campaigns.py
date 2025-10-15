@@ -32,12 +32,22 @@ from handlers.agent_handler import AgentHandler
 from app.models.schemas import AgentUpdate
 from app.models.campaigns import AgentAssignRequest, AgentSettingsPayload
 from app.db.postgres_client import get_db_connection
+from enum import Enum
+from pydantic import BaseModel
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/campaigns", tags=["Campaigns"])
 
 svc  = CampaignService()
 s3_handler = S3Handler()
+
+class CampaignStatus(str, Enum):
+    paused = "paused"
+    active = "active"
+    completed = "completed"
+
+class CampaignStatusUpdate(BaseModel):
+    status: CampaignStatus
 
 @router.post("/{campaign_id}/start", status_code=200)
 async def start_campaign(
@@ -353,6 +363,16 @@ async def complete_campaign(
 ):
     company_id = (await company_handler.get_company_by_user(current_user.id))["id"]
     return await _set_status(campaign_id, company_id, "completed", CampaignService())
+
+@router.patch("/{campaign_id}/status", status_code=200)
+async def update_campaign_status(
+    campaign_id: str,
+    payload: CampaignStatusUpdate,
+    current_user: UserResponse = Depends(get_current_user),
+    company_handler: CompanyHandler = Depends(CompanyHandler),
+):
+    company_id = (await company_handler.get_company_by_user(current_user.id))["id"]
+    return await _set_status(campaign_id, company_id, payload.status, CampaignService())
 
 @router.post("/{campaign_id}/duplicate", status_code=201)
 async def duplicate_campaign(
