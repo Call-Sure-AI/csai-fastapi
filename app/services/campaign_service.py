@@ -82,7 +82,7 @@ class CampaignService:
                     campaign_request.description,
                     company_id,
                     created_by,
-                    'active',
+                    'queued',
                     len(leads),
                     json.dumps([mapping.dict() for mapping in campaign_request.data_mapping]),
                     json.dumps(campaign_request.booking.dict()),
