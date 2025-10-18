@@ -34,6 +34,7 @@ class AutomationSettings(BaseModel):
 class CreateCampaignRequest(BaseModel):
     campaign_name: str = Field(..., min_length=1, max_length=255)
     description: Optional[str] = Field(None, max_length=1000)
+    agent_id: Optional[str] = None
     data_mapping: List[DataMapping]
     booking: CalendarBooking
     automation: AutomationSettings
@@ -71,11 +72,13 @@ class CampaignLead(BaseModel):
 
 class UpdateCampaignRequest(BaseModel):
     campaign_name: str | None = Field(None, max_length=255)
-    description:   str | None = Field(None, max_length=1000)
-    data_mapping:  List[DataMapping] | None = None
-    booking:       CalendarBooking  | None = None
-    automation:    AutomationSettings | None = None
-    status:        str | None = None
+    description: str | None = Field(None, max_length=1000)
+    agent_id: str | None = None
+    data_mapping: List[DataMapping] | None = None
+    booking: CalendarBooking | None = None
+    automation: AutomationSettings | None = None
+    status: str | None = None
+
 
 class AgentAssignRequest(BaseModel):
     agent_ids: List[str] = Field(..., min_items=1)
