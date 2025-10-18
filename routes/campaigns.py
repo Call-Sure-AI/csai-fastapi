@@ -161,10 +161,10 @@ async def create_campaign(
         req = CreateCampaignRequest(
             campaign_name=campaign_name,
             description=description,
+            agent_id=agent_id,
             data_mapping=mapping_obj,
             booking=booking_obj,
             automation=automation_obj,
-            leads_file_url=s3_url,
         )
 
         service = CampaignService()
@@ -174,15 +174,8 @@ async def create_campaign(
             created_by=current_user.id,
             csv_content=csv_text,
             s3_url=s3_url,
+            agent_id=agent_id,
         )
-
-        if agent_id:
-            try:
-                await service.assign_agents(campaign.id, [agent_id])
-                logger.info(f"Assigned agent {agent_id} to campaign {campaign.id}")
-                campaign = campaign.model_copy(update={"agent_id": agent_id})
-            except Exception as e:
-                logger.error(f"Error assigning agent {agent_id} to campaign {campaign.id}: {e}")
 
         background_tasks.add_task(
             setup_campaign_automation,
@@ -196,6 +189,24 @@ async def create_campaign(
         logger.error(f"Error creating campaign: {e}")
         raise HTTPException(500, f"Failed to create campaign: {e}")
 
+@router.patch("/{campaign_id}/agent")
+async def update_campaign_agent(
+    campaign_id: str,
+    agent_id: str | None = Form(None),
+    current_user: UserResponse = Depends(get_current_user),
+    company_handler: CompanyHandler = Depends(CompanyHandler),
+):
+    company = await company_handler.get_company_by_user(current_user.id)
+    if not company:
+        raise HTTPException(400, "User has no company")
+    company_id = company["id"]
+
+    payload = UpdateCampaignRequest(agent_id=agent_id)
+    updated = await svc.update_campaign(campaign_id, company_id, payload)
+    if not updated:
+        raise HTTPException(404, "Campaign not found")
+    
+    return {"message": "Agent updated successfully", "campaign": updated}
 
 @router.get("/company/{company_id}", response_model=List[CampaignResponse])
 async def get_company_campaigns(

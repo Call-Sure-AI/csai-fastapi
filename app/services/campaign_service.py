@@ -33,7 +33,6 @@ class CampaignService:
         pass
 
     def _to_campaign_response(self, row: dict) -> CampaignResponse:
-
         raw_mapping = row.pop("data_mapping", "[]")
         if isinstance(raw_mapping, str):
             raw_mapping = json.loads(raw_mapping)
@@ -49,7 +48,10 @@ class CampaignService:
             raw_auto = json.loads(raw_auto)
         row["automation"] = AutomationSettings(**raw_auto)
 
+        row["agent_id"] = row.get("agent_id")
+
         return CampaignResponse(**row)
+
 
     async def create_campaign(
         self, 
@@ -57,7 +59,8 @@ class CampaignService:
         company_id: str,
         created_by: str,
         csv_content: str,
-        s3_url: str # Add the s3_url parameter
+        s3_url: str,
+        agent_id: str | None = None
     ) -> CampaignResponse:
         try:
             campaign_id = f"CAMP-{str(uuid.uuid4())[:8].upper()}"
@@ -70,8 +73,8 @@ class CampaignService:
                 INSERT INTO Campaign (
                     id, campaign_name, description, company_id, created_by, 
                     status, leads_count, data_mapping, booking_config, 
-                    automation_config, leads_file_url, created_at, updated_at
-                ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+                    automation_config, leads_file_url, agent_id, created_at, updated_at
+                ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
                 RETURNING *
                 """
                 
@@ -87,7 +90,8 @@ class CampaignService:
                     json.dumps([mapping.dict() for mapping in campaign_request.data_mapping]),
                     json.dumps(campaign_request.booking.dict()),
                     json.dumps(campaign_request.automation.dict()),
-                    s3_url, # Pass the S3 URL to the database
+                    s3_url,
+                    agent_id or campaign_request.agent_id,
                     now,
                     now
                 )
@@ -100,6 +104,7 @@ class CampaignService:
         except Exception as e:
             logger.error(f"Error creating campaign: {str(e)}")
             raise Exception(f"Failed to create campaign: {str(e)}")
+
 
 
     async def _process_csv_leads(
@@ -221,18 +226,22 @@ class CampaignService:
     ) -> CampaignResponse | None:
 
         set_clauses: list[str] = []
-        values: list[Any]      = []
+        values: list[Any] = []
 
         if payload.campaign_name is not None:
             set_clauses.append(f"campaign_name = ${len(values)+1}")
             values.append(payload.campaign_name)
 
         if payload.description is not None:
-            set_clauses.append(f"description   = ${len(values)+1}")
+            set_clauses.append(f"description = ${len(values)+1}")
             values.append(payload.description)
 
+        if payload.agent_id is not None:
+            set_clauses.append(f"agent_id = ${len(values)+1}")
+            values.append(payload.agent_id)
+
         if payload.data_mapping is not None:
-            set_clauses.append(f"data_mapping   = ${len(values)+1}")
+            set_clauses.append(f"data_mapping = ${len(values)+1}")
             values.append(json.dumps([m.dict() for m in payload.data_mapping]))
 
         if payload.booking is not None:
@@ -248,7 +257,7 @@ class CampaignService:
 
         set_clauses.append("updated_at = CURRENT_TIMESTAMP")
 
-        id_placeholder      = f"${len(values)+1}"
+        id_placeholder = f"${len(values)+1}"
         company_placeholder = f"${len(values)+2}"
         values.extend([campaign_id, company_id])
 
@@ -265,6 +274,7 @@ class CampaignService:
             if not row:
                 return None
             return self._to_campaign_response(dict(row))
+
 
     async def delete_campaign(self, campaign_id: str, company_id: str) -> bool:
         async with await get_db_connection() as conn:
