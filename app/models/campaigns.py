@@ -75,6 +75,7 @@ class UpdateCampaignRequest(BaseModel):
     description: str | None = Field(None, max_length=1000)
     agent_id: str | None = None
     data_mapping: List[DataMapping] | None = None
+    status: Optional[str] = None
     booking: CalendarBooking | None = None
     automation: AutomationSettings | None = None
     status: str | None = None

@@ -247,6 +247,10 @@ class CampaignService:
         if payload.booking is not None:
             set_clauses.append(f"booking_config = ${len(values)+1}")
             values.append(json.dumps(payload.booking.dict()))
+    
+        if payload.status is not None:
+            set_clauses.append(f"status = ${len(values)+1}")
+            values.append(payload.status)
 
         if payload.automation is not None:
             set_clauses.append(f"automation_config = ${len(values)+1}")
