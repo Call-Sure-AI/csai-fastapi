@@ -301,16 +301,41 @@ async def update_campaign(
     current_user: UserResponse = Depends(get_current_user),
     company_handler: CompanyHandler = Depends(CompanyHandler),
 ):
-    company = await company_handler.get_company_by_user(current_user.id)
-    if not company:
-        raise HTTPException(400, "User has no company")
-    company_id = company["id"]
-
     svc = CampaignService()
-    updated = await svc.update_campaign(campaign_id, company_id, payload)
+
+    async with await get_db_connection() as conn:
+        campaign = await conn.fetchrow(
+            'SELECT id, company_id FROM "campaign" WHERE id = $1',
+            campaign_id
+        )
+        
+        if not campaign:
+            raise HTTPException(404, "Campaign not found")
+        
+        campaign_company_id = campaign['company_id']
+
+        user_company = await conn.fetchrow(
+            'SELECT id FROM "Company" WHERE id = $1 AND user_id = $2',
+            campaign_company_id,
+            current_user.id
+        )
+
+        if not user_company:
+            user_membership = await conn.fetchrow(
+                'SELECT company_id FROM "CompanyMember" WHERE company_id = $1 AND user_id = $2',
+                campaign_company_id,
+                current_user.id
+            )
+            
+            if not user_membership:
+                raise HTTPException(403, "You don't have access to this campaign")
+
+    updated = await svc.update_campaign(campaign_id, campaign_company_id, payload)
     if not updated:
         raise HTTPException(404, "Campaign not found")
+    
     return updated
+
 
 
 @router.delete("/{campaign_id}", status_code=204)
