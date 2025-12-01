@@ -1,3 +1,4 @@
+# scripts\create_scheduler_tables.py
 import asyncio
 import sys
 from pathlib import Path

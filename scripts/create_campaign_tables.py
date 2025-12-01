@@ -1,3 +1,4 @@
+# scripts\create_campaign_tables.py
 import asyncio
 from app.db.postgres_client import get_db_connection
 
@@ -45,7 +46,47 @@ async def create_campaign_tables():
                 details JSONB,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             );
+
+            CREATE TABLE IF NOT EXISTS campaign_slot_configuration (
+                id VARCHAR(255) PRIMARY KEY,
+                campaign_id VARCHAR(255) REFERENCES Campaign(id) ON DELETE CASCADE,
+                company_id VARCHAR(255) NOT NULL,
+                
+                -- Slot mode
+                slot_mode VARCHAR(50) DEFAULT 'dynamic' CHECK (slot_mode IN ('predefined', 'dynamic', 'hybrid')),
+                
+                -- Business hours (JSONB format: {"mon": {"start": "09:00", "end": "18:00"}, ...})
+                business_hours JSONB DEFAULT '{"mon": {"start": "09:00", "end": "18:00"}, "tue": {"start": "09:00", "end": "18:00"}, "wed": {"start": "09:00", "end": "18:00"}, "thu": {"start": "09:00", "end": "18:00"}, "fri": {"start": "09:00", "end": "18:00"}}'::jsonb,
+                timezone VARCHAR(50) DEFAULT 'UTC',
+                
+                -- Slot settings
+                slot_duration_minutes INTEGER DEFAULT 30,
+                buffer_minutes INTEGER DEFAULT 0,
+                
+                -- Capacity management (CRITICAL for multiple closers)
+                max_bookings_per_slot INTEGER DEFAULT 1,
+                allow_overbooking BOOLEAN DEFAULT FALSE,
+                
+                -- Customization
+                allow_custom_times BOOLEAN DEFAULT FALSE,
+                
+                -- Predefined slots (JSONB array: [{"day": "monday", "times": ["09:00", "11:00", "14:00"]}, ...])
+                predefined_slots JSONB DEFAULT '[]'::jsonb,
+                
+                -- Closer/Agent assignments (JSONB: [{"closer_id": "user_123", "name": "John", "shifts": [{"day": "monday", "start": "09:00", "end": "18:00"}]}])
+                closer_shifts JSONB DEFAULT '[]'::jsonb,
+                
+                -- Multiple bookings flag
+                allow_multiple_bookings_per_customer BOOLEAN DEFAULT FALSE,
+                
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                
+                UNIQUE(campaign_id)
+            );
             
+            CREATE INDEX IF NOT EXISTS idx_slot_config_campaign ON campaign_slot_configuration(campaign_id);
+            CREATE INDEX IF NOT EXISTS idx_slot_config_company ON campaign_slot_configuration(company_id);
             CREATE INDEX IF NOT EXISTS idx_campaign_company_id ON Campaign(company_id);
             CREATE INDEX IF NOT EXISTS idx_campaign_lead_campaign_id ON Campaign_Lead(campaign_id);
             CREATE INDEX IF NOT EXISTS idx_campaign_lead_status ON Campaign_Lead(status);

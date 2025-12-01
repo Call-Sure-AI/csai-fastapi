@@ -1,3 +1,4 @@
+# app\services\campaign_service.py
 import uuid
 import json
 import csv
@@ -1247,3 +1248,135 @@ class CampaignService:
             """, status, campaign_id, uuid.UUID(lead_id) if isinstance(lead_id, str) else lead_id)
             
             return result.startswith("UPDATE 1")
+
+
+    # ADD THESE METHODS TO CampaignService class
+
+    async def get_slot_configuration(self, campaign_id: str, company_id: str) -> Optional[Dict]:
+        """Get slot configuration for a campaign"""
+        async with await get_db_connection() as conn:
+            row = await conn.fetchrow("""
+                SELECT * FROM campaign_slot_configuration
+                WHERE campaign_id = $1 AND company_id = $2
+            """, campaign_id, company_id)
+            
+            if not row:
+                # Return default configuration
+                return {
+                    "slot_mode": "dynamic",
+                    "business_hours": {
+                        "mon": {"start": "09:00", "end": "18:00"},
+                        "tue": {"start": "09:00", "end": "18:00"},
+                        "wed": {"start": "09:00", "end": "18:00"},
+                        "thu": {"start": "09:00", "end": "18:00"},
+                        "fri": {"start": "09:00", "end": "18:00"}
+                    },
+                    "timezone": "UTC",
+                    "slot_duration_minutes": 30,
+                    "buffer_minutes": 0,
+                    "max_bookings_per_slot": 1,
+                    "allow_overbooking": False,
+                    "allow_custom_times": False,
+                    "predefined_slots": [],
+                    "closer_shifts": [],
+                    "allow_multiple_bookings_per_customer": False
+                }
+            
+            # Parse JSONB fields
+            config = dict(row)
+            if config.get('business_hours'):
+                config['business_hours'] = json.loads(config['business_hours'])
+            if config.get('predefined_slots'):
+                config['predefined_slots'] = json.loads(config['predefined_slots'])
+            if config.get('closer_shifts'):
+                config['closer_shifts'] = json.loads(config['closer_shifts'])
+            
+            return config
+
+    async def create_or_update_slot_configuration(
+        self,
+        campaign_id: str,
+        company_id: str,
+        config: Dict[str, Any]
+    ) -> Dict:
+        """Create or update slot configuration"""
+        
+        config_id = f"SLOT-{uuid.uuid4().hex[:8].upper()}"
+        
+        async with await get_db_connection() as conn:
+            # Check if config exists
+            existing = await conn.fetchrow("""
+                SELECT id FROM campaign_slot_configuration
+                WHERE campaign_id = $1
+            """, campaign_id)
+            
+            # Prepare JSONB fields
+            business_hours_json = json.dumps(config.get('business_hours', {}))
+            predefined_slots_json = json.dumps(config.get('predefined_slots', []))
+            closer_shifts_json = json.dumps(config.get('closer_shifts', []))
+            
+            if existing:
+                # Update
+                row = await conn.fetchrow("""
+                    UPDATE campaign_slot_configuration
+                    SET 
+                        slot_mode = $1,
+                        business_hours = $2::jsonb,
+                        timezone = $3,
+                        slot_duration_minutes = $4,
+                        buffer_minutes = $5,
+                        max_bookings_per_slot = $6,
+                        allow_overbooking = $7,
+                        allow_custom_times = $8,
+                        predefined_slots = $9::jsonb,
+                        closer_shifts = $10::jsonb,
+                        allow_multiple_bookings_per_customer = $11,
+                        updated_at = CURRENT_TIMESTAMP
+                    WHERE campaign_id = $12
+                    RETURNING *
+                """,
+                    config.get('slot_mode', 'dynamic'),
+                    business_hours_json,
+                    config.get('timezone', 'UTC'),
+                    config.get('slot_duration_minutes', 30),
+                    config.get('buffer_minutes', 0),
+                    config.get('max_bookings_per_slot', 1),
+                    config.get('allow_overbooking', False),
+                    config.get('allow_custom_times', False),
+                    predefined_slots_json,
+                    closer_shifts_json,
+                    config.get('allow_multiple_bookings_per_customer', False),
+                    campaign_id
+                )
+            else:
+                # Insert
+                row = await conn.fetchrow("""
+                    INSERT INTO campaign_slot_configuration (
+                        id, campaign_id, company_id, slot_mode, business_hours,
+                        timezone, slot_duration_minutes, buffer_minutes,
+                        max_bookings_per_slot, allow_overbooking, allow_custom_times,
+                        predefined_slots, closer_shifts, allow_multiple_bookings_per_customer
+                    ) VALUES ($1, $2, $3, $4, $5::jsonb, $6, $7, $8, $9, $10, $11, $12::jsonb, $13::jsonb, $14)
+                    RETURNING *
+                """,
+                    config_id, campaign_id, company_id,
+                    config.get('slot_mode', 'dynamic'),
+                    business_hours_json,
+                    config.get('timezone', 'UTC'),
+                    config.get('slot_duration_minutes', 30),
+                    config.get('buffer_minutes', 0),
+                    config.get('max_bookings_per_slot', 1),
+                    config.get('allow_overbooking', False),
+                    config.get('allow_custom_times', False),
+                    predefined_slots_json,
+                    closer_shifts_json,
+                    config.get('allow_multiple_bookings_per_customer', False)
+                )
+            
+            result = dict(row)
+            # Parse JSONB fields for response
+            result['business_hours'] = json.loads(result['business_hours'])
+            result['predefined_slots'] = json.loads(result['predefined_slots'])
+            result['closer_shifts'] = json.loads(result['closer_shifts'])
+            
+            return result
