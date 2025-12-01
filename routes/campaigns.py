@@ -32,12 +32,22 @@ from handlers.agent_handler import AgentHandler
 from app.models.schemas import AgentUpdate
 from app.models.campaigns import AgentAssignRequest, AgentSettingsPayload
 from app.db.postgres_client import get_db_connection
+from enum import Enum
+from pydantic import BaseModel
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/campaigns", tags=["Campaigns"])
 
 svc  = CampaignService()
 s3_handler = S3Handler()
+
+class CampaignStatus(str, Enum):
+    paused = "paused"
+    active = "active"
+    completed = "completed"
+
+class CampaignStatusUpdate(BaseModel):
+    status: CampaignStatus
 
 @router.post("/{campaign_id}/start", status_code=200)
 async def start_campaign(
@@ -151,10 +161,10 @@ async def create_campaign(
         req = CreateCampaignRequest(
             campaign_name=campaign_name,
             description=description,
+            agent_id=agent_id,
             data_mapping=mapping_obj,
             booking=booking_obj,
             automation=automation_obj,
-            leads_file_url=s3_url,
         )
 
         service = CampaignService()
@@ -164,15 +174,8 @@ async def create_campaign(
             created_by=current_user.id,
             csv_content=csv_text,
             s3_url=s3_url,
+            agent_id=agent_id,
         )
-
-        if agent_id:
-            try:
-                await service.assign_agents(campaign.id, [agent_id])
-                logger.info(f"Assigned agent {agent_id} to campaign {campaign.id}")
-                campaign = campaign.model_copy(update={"agent_id": agent_id})
-            except Exception as e:
-                logger.error(f"Error assigning agent {agent_id} to campaign {campaign.id}: {e}")
 
         background_tasks.add_task(
             setup_campaign_automation,
@@ -186,6 +189,24 @@ async def create_campaign(
         logger.error(f"Error creating campaign: {e}")
         raise HTTPException(500, f"Failed to create campaign: {e}")
 
+@router.patch("/{campaign_id}/agent")
+async def update_campaign_agent(
+    campaign_id: str,
+    agent_id: str | None = Form(None),
+    current_user: UserResponse = Depends(get_current_user),
+    company_handler: CompanyHandler = Depends(CompanyHandler),
+):
+    company = await company_handler.get_company_by_user(current_user.id)
+    if not company:
+        raise HTTPException(400, "User has no company")
+    company_id = company["id"]
+
+    payload = UpdateCampaignRequest(agent_id=agent_id)
+    updated = await svc.update_campaign(campaign_id, company_id, payload)
+    if not updated:
+        raise HTTPException(404, "Campaign not found")
+    
+    return {"message": "Agent updated successfully", "campaign": updated}
 
 @router.get("/company/{company_id}", response_model=List[CampaignResponse])
 async def get_company_campaigns(
@@ -280,16 +301,41 @@ async def update_campaign(
     current_user: UserResponse = Depends(get_current_user),
     company_handler: CompanyHandler = Depends(CompanyHandler),
 ):
-    company = await company_handler.get_company_by_user(current_user.id)
-    if not company:
-        raise HTTPException(400, "User has no company")
-    company_id = company["id"]
-
     svc = CampaignService()
-    updated = await svc.update_campaign(campaign_id, company_id, payload)
+
+    async with await get_db_connection() as conn:
+        campaign = await conn.fetchrow(
+            'SELECT id, company_id FROM "campaign" WHERE id = $1',
+            campaign_id
+        )
+        
+        if not campaign:
+            raise HTTPException(404, "Campaign not found")
+        
+        campaign_company_id = campaign['company_id']
+
+        user_company = await conn.fetchrow(
+            'SELECT id FROM "Company" WHERE id = $1 AND user_id = $2',
+            campaign_company_id,
+            current_user.id
+        )
+
+        if not user_company:
+            user_membership = await conn.fetchrow(
+                'SELECT company_id FROM "CompanyMember" WHERE company_id = $1 AND user_id = $2',
+                campaign_company_id,
+                current_user.id
+            )
+            
+            if not user_membership:
+                raise HTTPException(403, "You don't have access to this campaign")
+
+    updated = await svc.update_campaign(campaign_id, campaign_company_id, payload)
     if not updated:
         raise HTTPException(404, "Campaign not found")
+    
     return updated
+
 
 
 @router.delete("/{campaign_id}", status_code=204)
@@ -353,6 +399,16 @@ async def complete_campaign(
 ):
     company_id = (await company_handler.get_company_by_user(current_user.id))["id"]
     return await _set_status(campaign_id, company_id, "completed", CampaignService())
+
+@router.patch("/{campaign_id}/status", status_code=200)
+async def update_campaign_status(
+    campaign_id: str,
+    payload: CampaignStatusUpdate,
+    current_user: UserResponse = Depends(get_current_user),
+    company_handler: CompanyHandler = Depends(CompanyHandler),
+):
+    company_id = (await company_handler.get_company_by_user(current_user.id))["id"]
+    return await _set_status(campaign_id, company_id, payload.status, CampaignService())
 
 @router.post("/{campaign_id}/duplicate", status_code=201)
 async def duplicate_campaign(
