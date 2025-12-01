@@ -1,3 +1,4 @@
+# routes\bookings.py
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import StreamingResponse
 from typing import List, Optional
@@ -173,5 +174,54 @@ async def bulk_update_bookings(
         updated_count = await service.bulk_update_bookings(company_id, bulk_update)
         
         return {"message": f"Successfully updated {updated_count} booking(s)"}
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+@router.get("/campaigns/{campaign_id}/available-slots")
+async def get_available_slots(
+    campaign_id: str,
+    start_date: datetime = Query(..., description="Start date for slot search"),
+    end_date: datetime = Query(..., description="End date for slot search"),
+    count: int = Query(5, ge=1, le=20, description="Number of slots to return"),
+    current_user: UserResponse = Depends(get_current_user),
+    company_handler: CompanyHandler = Depends(CompanyHandler),
+):
+    """Get available booking slots for a campaign"""
+    company_id = await _ensure_user_access(current_user, company_handler)
+    
+    try:
+        service = BookingService()
+        slots = await service.get_available_slots(
+            campaign_id, company_id, start_date, end_date, count
+        )
+        return {"slots": slots, "count": len(slots)}
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+@router.get("/campaigns/{campaign_id}/slot-capacity")
+async def check_slot_capacity(
+    campaign_id: str,
+    slot_start: datetime = Query(..., description="Slot start time"),
+    slot_end: datetime = Query(..., description="Slot end time"),
+    current_user: UserResponse = Depends(get_current_user),
+    company_handler: CompanyHandler = Depends(CompanyHandler),
+):
+    """Check capacity for a specific time slot"""
+    company_id = await _ensure_user_access(current_user, company_handler)
+    
+    try:
+        service = BookingService()
+        
+        # Verify campaign belongs to company
+        async with await get_db_connection() as conn:
+            campaign = await conn.fetchrow("""
+                SELECT id FROM Campaign WHERE id = $1 AND company_id = $2
+            """, campaign_id, company_id)
+            
+            if not campaign:
+                raise HTTPException(404, "Campaign not found")
+        
+        capacity_info = await service.check_slot_capacity(campaign_id, slot_start, slot_end)
+        return capacity_info
     except ValueError as e:
         raise HTTPException(400, str(e))

@@ -1,3 +1,4 @@
+# app\services\booking_service.py
 import uuid
 import csv
 import io
@@ -296,3 +297,199 @@ class BookingService:
             
         output.seek(0)
         return output.getvalue()
+
+    async def check_slot_capacity(
+        self,
+        campaign_id: str,
+        slot_start: datetime,
+        slot_end: datetime
+    ) -> Dict[str, Any]:
+        """Check if slot has available capacity"""
+        
+        slot_start_naive = to_naive_utc(slot_start)
+        slot_end_naive = to_naive_utc(slot_end)
+        
+        async with await get_db_connection() as conn:
+            # Get slot configuration
+            config = await conn.fetchrow("""
+                SELECT max_bookings_per_slot, allow_overbooking
+                FROM campaign_slot_configuration
+                WHERE campaign_id = $1
+            """, campaign_id)
+            
+            if not config:
+                # Default: 1 booking per slot
+                max_capacity = 1
+                allow_overbooking = False
+            else:
+                max_capacity = config['max_bookings_per_slot']
+                allow_overbooking = config['allow_overbooking']
+            
+            # Count existing bookings in this slot
+            existing_count = await conn.fetchval("""
+                SELECT COUNT(*) FROM booking
+                WHERE campaign_id = $1
+                AND status IN ('pending', 'confirmed')
+                AND (
+                    (slot_start <= $2 AND slot_end > $2) OR
+                    (slot_start < $3 AND slot_end >= $3) OR
+                    (slot_start >= $2 AND slot_end <= $3)
+                )
+            """, campaign_id, slot_start_naive, slot_end_naive)
+            
+            available_capacity = max_capacity - existing_count
+            is_available = available_capacity > 0 or allow_overbooking
+            
+            return {
+                "available": is_available,
+                "current_bookings": existing_count,
+                "max_capacity": max_capacity,
+                "available_capacity": max(0, available_capacity),
+                "allow_overbooking": allow_overbooking
+            }
+
+    async def get_available_slots(
+        self,
+        campaign_id: str,
+        company_id: str,
+        start_date: datetime,
+        end_date: datetime,
+        count: int = 5
+    ) -> List[Dict[str, Any]]:
+        """Get available time slots for a campaign"""
+        
+        async with await get_db_connection() as conn:
+            # Verify campaign belongs to company
+            campaign = await conn.fetchrow("""
+                SELECT id FROM Campaign
+                WHERE id = $1 AND company_id = $2
+            """, campaign_id, company_id)
+            
+            if not campaign:
+                raise ValueError("Campaign not found")
+            
+            # Get slot configuration
+            config = await conn.fetchrow("""
+                SELECT * FROM campaign_slot_configuration
+                WHERE campaign_id = $1
+            """, campaign_id)
+            
+            if not config:
+                # Return empty if no configuration
+                return []
+            
+            # Parse configuration
+            slot_mode = config['slot_mode']
+            predefined_slots = json.loads(config['predefined_slots']) if config['predefined_slots'] else []
+            business_hours = json.loads(config['business_hours']) if config['business_hours'] else {}
+            max_capacity = config['max_bookings_per_slot']
+            
+            available_slots = []
+            
+            if slot_mode in ['predefined', 'hybrid'] and predefined_slots:
+                # Generate slots from predefined times
+                available_slots = await self._generate_predefined_slots(
+                    campaign_id, predefined_slots, business_hours,
+                    start_date, end_date, max_capacity, count
+                )
+            
+            if slot_mode in ['dynamic', 'hybrid'] and len(available_slots) < count:
+                # Generate dynamic slots from business hours
+                dynamic_slots = await self._generate_dynamic_slots(
+                    campaign_id, business_hours, start_date, end_date,
+                    max_capacity, count - len(available_slots)
+                )
+                available_slots.extend(dynamic_slots)
+            
+            return available_slots[:count]
+
+    async def _generate_predefined_slots(
+        self,
+        campaign_id: str,
+        predefined_slots: List[Dict],
+        business_hours: Dict,
+        start_date: datetime,
+        end_date: datetime,
+        max_capacity: int,
+        count: int
+    ) -> List[Dict[str, Any]]:
+        """Generate slots from predefined configuration"""
+        
+        slots = []
+        current_date = start_date.date()
+        end = end_date.date()
+        
+        while current_date <= end and len(slots) < count:
+            day_name = current_date.strftime('%A').lower()[:3]  # "mon", "tue", etc.
+            
+            # Find predefined slots for this day
+            day_slots = next((s for s in predefined_slots if s['day'].startswith(day_name)), None)
+            
+            if day_slots:
+                for time_str in day_slots.get('times', []):
+                    slot_datetime = datetime.combine(current_date, datetime.strptime(time_str, "%H:%M").time())
+                    slot_end = slot_datetime + timedelta(minutes=30)  # Default duration
+                    
+                    # Check capacity
+                    capacity_info = await self.check_slot_capacity(campaign_id, slot_datetime, slot_end)
+                    
+                    if capacity_info['available']:
+                        slots.append({
+                            "start": slot_datetime.isoformat(),
+                            "end": slot_end.isoformat(),
+                            "available_capacity": capacity_info['available_capacity'],
+                            "max_capacity": max_capacity
+                        })
+                    
+                    if len(slots) >= count:
+                        break
+            
+            current_date += timedelta(days=1)
+        
+        return slots
+
+    async def _generate_dynamic_slots(
+        self,
+        campaign_id: str,
+        business_hours: Dict,
+        start_date: datetime,
+        end_date: datetime,
+        max_capacity: int,
+        count: int
+    ) -> List[Dict[str, Any]]:
+        """Generate dynamic slots from business hours"""
+        
+        slots = []
+        current_date = start_date.date()
+        end = end_date.date()
+        
+        while current_date <= end and len(slots) < count:
+            day_name = current_date.strftime('%A').lower()[:3]
+            day_hours = business_hours.get(day_name)
+            
+            if day_hours:
+                start_time = datetime.strptime(day_hours.get('start', '09:00'), "%H:%M").time()
+                end_time = datetime.strptime(day_hours.get('end', '18:00'), "%H:%M").time()
+                
+                # Generate slots every 30 minutes
+                current_time = datetime.combine(current_date, start_time)
+                day_end = datetime.combine(current_date, end_time)
+                
+                while current_time < day_end and len(slots) < count:
+                    slot_end = current_time + timedelta(minutes=30)
+                    
+                    capacity_info = await self.check_slot_capacity(campaign_id, current_time, slot_end)
+                    
+                    if capacity_info['available']:
+                        slots.append({
+                            "start": current_time.isoformat(),
+                            "end": slot_end.isoformat(),
+                            "available_capacity": capacity_info['available_capacity'],
+                            "max_capacity": max_capacity
+                        })
+                    
+                    current_time += timedelta(minutes=30)
+            
+            current_date += timedelta(days=1)
+        
+        return slots
