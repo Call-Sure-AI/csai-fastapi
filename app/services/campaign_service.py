@@ -26,6 +26,8 @@ from app.models.schemas import (
     CSVParseResponse, CSVValidateRequest, CSVValidateResponse, 
     CSVValidationError, CSVMapFieldsRequest, CSVMapFieldsResponse, FieldMapping
 )
+import asyncio
+import httpx
 
 logger = logging.getLogger(__name__)
 
@@ -128,15 +130,20 @@ class CampaignService:
                     'email': None,
                     'phone': None,
                     'company': None,
-                    'custom_fields': {}
+                    'country_code': None,
+                    'custom_fields': {},
+                    'call_attempts': 0,
+                    'last_call_at': None,
+                    'status': 'pending'
                 }
 
                 for csv_col, mapped_field in column_mapping.items():
-                    if csv_col in row and row[csv_col]:
-                        if mapped_field in ['first_name', 'last_name', 'email', 'phone', 'company']:
-                            lead[mapped_field] = row[csv_col].strip()
+                    if csv_col in row and row[csv_col] and row[csv_col].strip() != "":
+                        value = row[csv_col].strip()
+                        if mapped_field in ['first_name', 'last_name', 'email', 'phone', 'company', 'country_code']:
+                            lead[mapped_field] = value
                         else:
-                            lead['custom_fields'][mapped_field] = row[csv_col].strip()
+                            lead['custom_fields'][mapped_field] = value
                 
                 leads.append(lead)
                 
@@ -146,6 +153,7 @@ class CampaignService:
         
         return leads
 
+
     async def _create_campaign_leads(
         self, 
         conn, 
@@ -154,10 +162,25 @@ class CampaignService:
     ):
         
         lead_query = """
-        INSERT INTO Campaign_Lead (
-            id, campaign_id, first_name, last_name, email, phone, 
-            company, custom_fields, created_at, updated_at
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+        INSERT INTO campaign_lead (
+            id,
+            campaign_id,
+            first_name,
+            last_name,
+            email,
+            phone,
+            company,
+            custom_fields,
+            call_attempts,
+            last_call_at,
+            status,
+            created_at,
+            updated_at,
+            country_code
+        ) VALUES (
+            $1, $2, $3, $4, $5, $6, $7, $8::jsonb, $9, $10, $11, $12, $13, $14
+        )
+        ON CONFLICT (id) DO NOTHING
         """
         
         now = datetime.utcnow()
@@ -166,14 +189,18 @@ class CampaignService:
                 lead_query,
                 lead['id'],
                 campaign_id,
-                lead['first_name'],
-                lead['last_name'],
-                lead['email'],
-                lead['phone'],
-                lead['company'],
-                json.dumps(lead['custom_fields']),
+                lead.get('first_name'),
+                lead.get('last_name'),
+                lead.get('email'),
+                lead.get('phone'),
+                lead.get('company'),
+                json.dumps(lead.get('custom_fields', {})),
+                lead.get('call_attempts', 0),
+                lead.get('last_call_at'),
+                lead.get('status', 'pending'),
                 now,
-                now
+                now,
+                lead.get('country_code')
             )
 
     async def get_campaign(self, campaign_id: str, company_id: str) -> Optional[CampaignResponse]:      
@@ -1226,9 +1253,76 @@ class CampaignService:
             'updated': updated,
             'failed': failed,
             'total': imported + updated + failed,
-            'errors': errors[:10]  # Return first 10 errors
+            'errors': errors[:10]
         }
-    
+
+    async def get_campaign_leads(self, campaign_id: str, status: str = "pending") -> list[dict]:
+        """
+        Fetch leads for a campaign from campaign_lead table.
+        By default returns leads with status = 'pending'.
+        """
+        try:
+            async with await get_db_connection() as conn:
+                rows = await conn.fetch(
+                    """
+                    SELECT id, campaign_id, first_name, last_name, email, phone, company,
+                           custom_fields, call_attempts, last_call_at, status, created_at, updated_at, country_code
+                    FROM campaign_lead
+                    WHERE campaign_id = $1 AND status = $2
+                    ORDER BY created_at ASC
+                    """,
+                    campaign_id,
+                    status
+                )
+                return [dict(r) for r in rows] if rows else []
+        except Exception as e:
+            logger.error(f"Error fetching campaign leads for {campaign_id}: {e}")
+            raise
+
+    async def mark_campaign_lead_call(self, campaign_id: str, lead_id: str | None, success: bool, phone: str | None = None):
+        try:
+            async with await get_db_connection() as conn:
+                if lead_id:
+                    row = await conn.fetchrow(
+                        """
+                        UPDATE campaign_lead
+                        SET call_attempts = COALESCE(call_attempts, 0) + 1,
+                            last_call_at = NOW(),
+                            status = CASE WHEN $3 THEN 'contacted' ELSE COALESCE(status, 'no_answer') END,
+                            updated_at = NOW()
+                        WHERE id = $1 AND campaign_id = $2
+                        RETURNING id, campaign_id, phone, call_attempts, last_call_at, status
+                        """,
+                        lead_id,
+                        campaign_id,
+                        success
+                    )
+                else:
+                    phone_norm = None
+                    if phone:
+                        phone_norm = phone.lstrip('+')
+                    row = await conn.fetchrow(
+                        """
+                        UPDATE campaign_lead
+                        SET call_attempts = COALESCE(call_attempts, 0) + 1,
+                            last_call_at = NOW(),
+                            status = CASE WHEN $3 THEN 'contacted' ELSE COALESCE(status, 'no_answer') END,
+                            updated_at = NOW()
+                        WHERE campaign_id = $1 AND (phone = $2 OR phone = $4)
+                        RETURNING id, campaign_id, phone, call_attempts, last_call_at, status
+                        """,
+                        campaign_id,
+                        phone,
+                        success,
+                        phone_norm
+                    )
+
+                return dict(row) if row else None
+
+        except Exception as e:
+            logger.error(f"Error marking campaign lead call (campaign={campaign_id}, lead_id={lead_id}, phone={phone}): {e}")
+            raise
+ 
     async def get_campaign_leads_v2(self, campaign_id: str, offset: int = 0, limit: int = 100) -> List[Dict]:
         """Get leads for a campaign using new structure"""
         
@@ -1394,3 +1488,112 @@ class CampaignService:
             result['closer_shifts'] = json.loads(result['closer_shifts'])
             
             return result
+
+async def _process_campaign_on_activate(campaign_id: str, company_id: str, user_id: str):
+    svc = CampaignService()
+    try:
+        campaign = await svc.get_campaign(campaign_id, company_id)
+        if not campaign:
+            logger.error(f"[activate] Campaign not found: {campaign_id}")
+            return
+
+        #automation = getattr(campaign, "automation", {}) or campaign.automation if hasattr(campaign, "automation") else {}
+        agent_id = getattr(campaign, "agent_id", None) or (campaign.agent_id if hasattr(campaign, "agent_id") else None)
+
+        automation_model = getattr(campaign, "automation", None)
+
+        if automation_model is None:
+            automation = {}
+        else:
+            try:
+                automation = automation_model.dict()
+            except Exception:
+                automation = dict(automation_model) if isinstance(automation_model, dict) else {}
+
+        max_call_attempts = int(automation.get("max_call_attempts", 3))
+        call_interval_minutes = float(automation.get("call_interval_minutes", 5))
+        max_concurrent_calls = int(automation.get("max_concurrent_calls", 5))
+        delay_between_calls = float(automation.get("delay_between_calls", 2))
+        call_script = automation.get("call_script", "")
+        enable_followup = bool(automation.get("enable_followup_emails", False))
+
+        leads = await svc.get_campaign_leads(campaign_id, status="pending")
+        if not leads:
+            logger.info(f"[activate] No pending leads found for campaign {campaign_id}")
+            return
+
+        sem = asyncio.Semaphore(max_concurrent_calls)
+
+        async def dial_one(lead: dict):
+            lead_id = lead.get("id")
+            phone_raw = (lead.get("phone") or "").strip()
+            country_code_raw = str(lead.get("country_code") or "").strip()
+            if not phone_raw:
+                logger.warning(f"[activate] Skipping lead {lead_id} with empty phone")
+                return
+
+            phone_digits = re.sub(r'\D', '', phone_raw)
+            cc_digits = re.sub(r'\D', '', country_code_raw)
+
+            if phone_digits.startswith("0") and cc_digits:
+                phone_digits = phone_digits.lstrip("0")
+
+            if cc_digits:
+                to_number = f"+{cc_digits}{phone_digits}"
+            else:
+                to_number = f"+{phone_digits}" if not phone_raw.startswith("+") else phone_raw
+
+            customer_name = (lead.get("first_name") or "").strip()
+
+            payload = {
+                "to_number": to_number,
+                "company_id": company_id,
+                "agent_id": agent_id,
+                "customer_name": customer_name,
+                "campaign_id": campaign_id,
+                "call_script": call_script
+            }
+
+            attempt = 0
+            success = False
+            while attempt < max_call_attempts and not success:
+                attempt += 1
+                try:
+                    async with sem:
+                        async with httpx.AsyncClient(timeout=30.0) as client:
+                            resp = await client.post(
+                                "https://processor.callsure.ai/api/v1/twilio-elevenlabs/initiate-outbound-call",
+                                json=payload,
+                                headers={"Content-Type": "application/json"}
+                            )
+                        if resp.status_code in (200, 201, 202):
+                            success = True
+                            logger.info(f"[activate] Call initiated for lead {lead_id} -> {to_number} (campaign {campaign_id})")
+                            try:
+                                await svc.mark_campaign_lead_call(campaign_id, lead_id, success=True, phone=to_number)
+                            except Exception as e:
+                                logger.warning(f"[activate] mark_campaign_lead_call failed for lead {lead_id}: {e}")
+                            break
+                        else:
+                            logger.warning(f"[activate] Call API returned {resp.status_code} for {to_number}: {resp.text}")
+                except Exception as e:
+                    logger.error(f"[activate] Error calling {to_number} attempt {attempt}: {e}")
+
+                if not success and attempt < max_call_attempts:
+                    await asyncio.sleep(call_interval_minutes * 60)
+
+            if not success:
+                try:
+                    await svc.mark_campaign_lead_call(campaign_id, lead_id, success=False, phone=to_number)
+                except Exception as e:
+                    logger.warning(f"[activate] final mark_campaign_lead_call failed for lead {lead_id}: {e}")
+
+            await asyncio.sleep(delay_between_calls)
+
+        tasks = [asyncio.create_task(dial_one(ld)) for ld in leads]
+        await asyncio.gather(*tasks, return_exceptions=True)
+
+        logger.info(f"[activate] Completed dialing for campaign {campaign_id}")
+
+    except Exception as e:
+        logger.exception(f"[activate] Unhandled exception for campaign {campaign_id}: {e}")

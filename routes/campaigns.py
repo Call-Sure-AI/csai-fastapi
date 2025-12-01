@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, BackgroundTasks, Query, WebSocket, WebSocketDisconnect
 from fastapi.responses import StreamingResponse, JSONResponse
-from typing import List, Optional
+from typing import List, Optional, Any
 import uuid
 import asyncio
 import logging
@@ -21,7 +21,7 @@ from app.models.schemas import (
 
 from app.models.campaigns import CreateCampaignRequest, CampaignResponse, UpdateCampaignRequest
 from middleware.auth_middleware import get_current_user
-from app.services.campaign_service import CampaignService
+from app.services.campaign_service import CampaignService, _process_campaign_on_activate
 from app.services.websocket_service import manager, WebSocketService
 from handlers.s3_handler import S3Handler
 import io, csv
@@ -34,6 +34,7 @@ from app.models.campaigns import AgentAssignRequest, AgentSettingsPayload
 from app.db.postgres_client import get_db_connection
 from enum import Enum
 from pydantic import BaseModel
+import httpx
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/campaigns", tags=["Campaigns"])
@@ -141,7 +142,7 @@ async def create_campaign(
 
         upload_result = await s3_handler.upload_file(
             file=leads_csv,
-            custom_key=f"campaigns/{company_id}/{campaign_name}-{uuid.uuid4().hex}.csv"
+            custom_key=f"campaigns/{company_id}/{campaign_name.lower().replace(' ', '_')}-{uuid.uuid4().hex}.csv"
         )
         if not upload_result["success"]:
             raise HTTPException(500, f"Failed to upload CSV to S3: {upload_result['error']}")
@@ -298,6 +299,7 @@ async def setup_campaign_automation(
 async def update_campaign(
     campaign_id: str,
     payload: UpdateCampaignRequest,
+    background_tasks: BackgroundTasks,
     current_user: UserResponse = Depends(get_current_user),
     company_handler: CompanyHandler = Depends(CompanyHandler),
 ):
@@ -333,6 +335,16 @@ async def update_campaign(
     updated = await svc.update_campaign(campaign_id, campaign_company_id, payload)
     if not updated:
         raise HTTPException(404, "Campaign not found")
+    try:
+        if payload.status == "active":
+            background_tasks.add_task(
+                _process_campaign_on_activate,
+                campaign_id,
+                campaign_company_id,
+                current_user.id
+            )
+    except Exception as e:
+        logger.error(f"Failed to schedule activation background task for {campaign_id}: {e}")
     
     return updated
 
