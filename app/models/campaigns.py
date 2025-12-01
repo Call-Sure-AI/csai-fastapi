@@ -95,7 +95,9 @@ class AutomationSettings(BaseModel):
     email_template: Optional[str] = None
     call_script: Optional[str] = None
     max_call_attempts: int = Field(3, ge=1, le=10)
-    call_interval_hours: int = Field(24, ge=1, le=168)  # Max 1 week
+    delay_between_calls: int = Field(1, ge=1, le=60)
+    max_concurrent_calls: int = Field(5, ge=1, le=20)
+    call_interval_minutes: int = Field(24, ge=1, le=168)
     enable_followup_emails: bool = True
     followup_email_template: Optional[str] = None
 
