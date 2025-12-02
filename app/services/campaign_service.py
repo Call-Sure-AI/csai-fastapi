@@ -1042,46 +1042,62 @@ class CampaignService:
                 params.append(campaign_id)
                 await conn.execute(query, *params)
 
-    async def initiate_lead_call(self, campaign_id: str, lead_id: str, call_settings: Dict, user_id: str) -> Dict:
-        """Initiate AI call for a specific lead"""
-        async with (await get_db_connection()) as conn:
-            try:
-                # Update lead call attempt
-                await conn.execute("""
-                    UPDATE leads 
-                    SET call_attempts = call_attempts + 1,
-                        last_called_at = NOW(),
-                        updated_at = NOW()
-                    WHERE id = $1 AND campaign_id = $2
-                """, lead_id, campaign_id)
-                
-                # Mock call result - replace with actual AI calling logic
-                import random
-                success = random.choice([True, True, False])  # 66% success rate for demo
-                
-                if success:
-                    # Update lead status on successful call
-                    await conn.execute("""
-                        UPDATE leads 
-                        SET status = 'contacted'
+    async def _initiate_lead_call(self, campaign_id: str, lead_id: str | None, to_number: str | None, call_sid: str | None, call_status: str | None):
+        """
+        Persist a call attempt for a lead in campaign_lead table.
+        Writes: call_attempts, last_call_at, status, last_call_sid, updated_at.
+        """
+        try:
+            async with await get_db_connection() as conn:
+                if lead_id:
+                    row = await conn.fetchrow(
+                        """
+                        UPDATE campaign_lead
+                        SET call_attempts = COALESCE(call_attempts, 0) + 1,
+                            last_call_at = NOW(),
+                            status = $3,
+                            last_call_sid = $4,
+                            updated_at = NOW()
                         WHERE id = $1 AND campaign_id = $2
-                    """, lead_id, campaign_id)
-                
-                return {
-                    "success": success,
-                    "lead_id": lead_id,
-                    "call_id": f"call_{uuid.uuid4().hex[:8]}",
-                    "error": None if success else "Lead unavailable"
-                }
-                
-            except Exception as e:
-                logger.error(f"Error initiating call for lead {lead_id}: {e}")
-                return {
-                    "success": False,
-                    "lead_id": lead_id,
-                    "call_id": None,
-                    "error": str(e)
-                }
+                        RETURNING id, campaign_id, phone, call_attempts, last_call_at, status, last_call_sid
+                        """,
+                        lead_id,
+                        campaign_id,
+                        call_status or 'no-answer',
+                        call_sid
+                    )
+                else:
+                    phone_norm = to_number.lstrip('+') if to_number else None
+                    row = await conn.fetchrow(
+                        """
+                        UPDATE campaign_lead
+                        SET call_attempts = COALESCE(call_attempts, 0) + 1,
+                            last_call_at = NOW(),
+                            status = $3,
+                            last_call_sid = $4,
+                            updated_at = NOW()
+                        WHERE campaign_id = $1 AND (phone = $2 OR phone = $5)
+                        RETURNING id, campaign_id, phone, call_attempts, last_call_at, status, last_call_sid
+                        """,
+                        campaign_id,
+                        to_number,
+                        call_status or 'no-answer',
+                        call_sid,
+                        phone_norm
+                    )
+
+                if row:
+                    rd = dict(row)
+                    logger.info("[activate] Persisted call attempt for lead %s phone=%s attempts=%s status=%s sid=%s",
+                                rd.get("id"), rd.get("phone"), rd.get("call_attempts"), rd.get("status"), rd.get("last_call_sid"))
+                    return rd
+                else:
+                    logger.warning("[activate] _initiate_lead_call: no matching campaign_lead row found for lead_id=%s phone=%s", lead_id, to_number)
+                    return None
+
+        except Exception as e:
+            logger.exception("[activate] Error persisting call attempt for lead_id=%s phone=%s: %s", lead_id, to_number, e)
+            raise
 
     async def get_leads_count(self, campaign_id: str) -> int:
         """Get total leads count for campaign"""
@@ -1524,17 +1540,20 @@ async def _process_campaign_on_activate(campaign_id: str, company_id: str, user_
 
         sem = asyncio.Semaphore(max_concurrent_calls)
 
-        async def dial_one(lead: dict):
+        async def dial_once_and_get_sid(lead: dict) -> dict:
+            """
+            Initiates a single outbound call attempt and returns:
+            {"success": bool, "call_sid": str|None, "processor_status": str|None, "to_number": str, "lead_id": str}
+            """
             lead_id = lead.get("id")
             phone_raw = (lead.get("phone") or "").strip()
             country_code_raw = str(lead.get("country_code") or "").strip()
             if not phone_raw:
-                logger.warning(f"[activate] Skipping lead {lead_id} with empty phone")
-                return
+                logger.warning("[activate] Skipping lead %s - no phone", lead_id)
+                return {"success": False, "call_sid": None, "processor_status": None, "to_number": None, "lead_id": lead_id}
 
             phone_digits = re.sub(r'\D', '', phone_raw)
             cc_digits = re.sub(r'\D', '', country_code_raw)
-
             if phone_digits.startswith("0") and cc_digits:
                 phone_digits = phone_digits.lstrip("0")
 
@@ -1544,7 +1563,6 @@ async def _process_campaign_on_activate(campaign_id: str, company_id: str, user_
                 to_number = f"+{phone_digits}" if not phone_raw.startswith("+") else phone_raw
 
             customer_name = (lead.get("first_name") or "").strip()
-
             payload = {
                 "to_number": to_number,
                 "company_id": company_id,
@@ -1554,43 +1572,98 @@ async def _process_campaign_on_activate(campaign_id: str, company_id: str, user_
                 "call_script": call_script
             }
 
-            attempt = 0
-            success = False
-            while attempt < max_call_attempts and not success:
-                attempt += 1
+            try:
+                async with sem:
+                    async with httpx.AsyncClient(timeout=30.0) as client:
+                        resp = await client.post(
+                            "https://processor.callsure.ai/api/v1/twilio-elevenlabs/initiate-outbound-call",
+                            json=payload,
+                            headers={"Content-Type": "application/json"}
+                        )
                 try:
-                    async with sem:
-                        async with httpx.AsyncClient(timeout=30.0) as client:
-                            resp = await client.post(
-                                "https://processor.callsure.ai/api/v1/twilio-elevenlabs/initiate-outbound-call",
-                                json=payload,
-                                headers={"Content-Type": "application/json"}
-                            )
-                        if resp.status_code in (200, 201, 202):
-                            success = True
-                            logger.info(f"[activate] Call initiated for lead {lead_id} -> {to_number} (campaign {campaign_id})")
-                            try:
-                                await svc.mark_campaign_lead_call(campaign_id, lead_id, success=True, phone=to_number)
-                            except Exception as e:
-                                logger.warning(f"[activate] mark_campaign_lead_call failed for lead {lead_id}: {e}")
-                            break
-                        else:
-                            logger.warning(f"[activate] Call API returned {resp.status_code} for {to_number}: {resp.text}")
-                except Exception as e:
-                    logger.error(f"[activate] Error calling {to_number} attempt {attempt}: {e}")
+                    j = resp.json()
+                except Exception:
+                    j = {}
 
-                if not success and attempt < max_call_attempts:
+                processor_status = j.get("status") or (j.get("success") and "queued") or None
+                call_sid = j.get("call_sid")
+
+                if resp.status_code in (200, 201, 202) and (processor_status or call_sid):
+                    try:
+                        await svc._initiate_lead_call(campaign_id=campaign_id, lead_id=lead_id, to_number=to_number, call_sid=call_sid, call_status=processor_status)
+                    except Exception as e:
+                        logger.warning("[activate] _initiate_lead_call failed (initial): %s", e)
+                    logger.info("[activate] Call initiated for lead %s -> %s (campaign %s) sid=%s status=%s", lead_id, to_number, campaign_id, call_sid, processor_status)
+                    return {"success": True, "call_sid": call_sid, "processor_status": processor_status, "to_number": to_number, "lead_id": lead_id}
+                else:
+                    try:
+                        await svc._initiate_lead_call(campaign_id=campaign_id, lead_id=lead_id, to_number=to_number, call_sid=call_sid, call_status=processor_status or 'no-answer')
+                    except Exception:
+                        pass
+                    logger.warning("[activate] Call API returned %s for %s: %s", resp.status_code, to_number, resp.text)
+                    return {"success": False, "call_sid": call_sid, "processor_status": processor_status, "to_number": to_number, "lead_id": lead_id}
+            except Exception as e:
+                logger.exception("[activate] Error initiating call for lead %s to %s: %s", lead_id, to_number, e)
+                try:
+                    await svc._initiate_lead_call(campaign_id=campaign_id, lead_id=lead_id, to_number=to_number, call_sid=None, call_status='no-answer')
+                except Exception:
+                    pass
+                return {"success": False, "call_sid": None, "processor_status": None, "to_number": to_number, "lead_id": lead_id}
+
+        async def process_with_retries(lead: dict):
+            lead_id = lead.get("id")
+            attempts = 0
+            remaining_attempts = max_call_attempts
+
+            last_call_sid = None
+            last_to_number = None
+            last_processor_status = None
+
+            while remaining_attempts > 0:
+                attempts += 1
+                remaining_attempts -= 1
+
+                res = await dial_once_and_get_sid(lead)
+                last_call_sid = res.get("call_sid")
+                last_to_number = res.get("to_number")
+                last_processor_status = res.get("processor_status")
+
+                if not last_call_sid:
+                    logger.warning("[activate] No call_sid for lead %s attempt %s; remaining=%s", lead_id, attempts, remaining_attempts)
+                    if remaining_attempts <= 0:
+                        logger.info("[activate] Exhausted attempts for lead %s without call_sid", lead_id)
+                        break
                     await asyncio.sleep(call_interval_minutes * 60)
+                    continue
 
-            if not success:
+                logger.info("[activate] Waiting %s minute(s) to check Call table for call_sid=%s (lead=%s)", call_interval_minutes, last_call_sid, lead_id)
+                await asyncio.sleep(call_interval_minutes * 60)
+
                 try:
-                    await svc.mark_campaign_lead_call(campaign_id, lead_id, success=False, phone=to_number)
+                    async with await get_db_connection() as conn:
+                        call_row = await conn.fetchrow('SELECT status FROM "Call" WHERE call_sid = $1', last_call_sid)
+                        if call_row:
+                            call_table_status = (call_row.get("status") or "").lower()
+                        else:
+                            logger.warning("[activate] No row in Call table for call_sid=%s; treating as no-answer for retry decision", last_call_sid)
+                            call_table_status = "no-answer"
                 except Exception as e:
-                    logger.warning(f"[activate] final mark_campaign_lead_call failed for lead {lead_id}: {e}")
+                    logger.exception("[activate] Error querying Call table for call_sid=%s: %s", last_call_sid, e)
+                    call_table_status = "no-answer"
 
-            await asyncio.sleep(delay_between_calls)
+                logger.info("[activate] Call table status for sid=%s -> %s (lead=%s)", last_call_sid, call_table_status, lead_id)
 
-        tasks = [asyncio.create_task(dial_one(ld)) for ld in leads]
+                if call_table_status == "no-answer":
+                    if remaining_attempts <= 0:
+                        logger.info("[activate] No remaining attempts for lead %s; stop retrying", lead_id)
+                        break
+                    logger.info("[activate] Retrying lead %s (attempts so far=%s)", lead_id, attempts)
+                    continue
+                else:
+                    logger.info("[activate] Terminal/answered status for lead %s: %s — no retry", lead_id, call_table_status)
+                    break
+
+        tasks = [asyncio.create_task(process_with_retries(ld)) for ld in leads]
         await asyncio.gather(*tasks, return_exceptions=True)
 
         logger.info(f"[activate] Completed dialing for campaign {campaign_id}")
