@@ -1295,6 +1295,27 @@ class CampaignService:
             logger.error(f"Error fetching campaign leads for {campaign_id}: {e}")
             raise
 
+    async def log_campaign_status_change(self, campaign_id: str, status: str) -> dict | None:
+        activity_id = f"ACT-{uuid.uuid4().hex[:8].upper()}"
+        now = datetime.utcnow()
+        try:
+            async with await get_db_connection() as conn:
+                rec = await conn.fetchrow(
+                    """
+                    INSERT INTO campaign_status_history (id, campaign_id, status, changed_at)
+                    VALUES ($1, $2, $3, $4)
+                    RETURNING id, campaign_id, status, changed_at
+                    """,
+                    activity_id,
+                    campaign_id,
+                    status,
+                    now
+                )
+                return dict(rec) if rec else None
+        except Exception as e:
+            logger.exception("Failed to log campaign status change for %s -> %s: %s", campaign_id, status, e)
+            return None
+
     async def mark_campaign_lead_call(self, campaign_id: str, lead_id: str | None, success: bool, phone: str | None = None):
         try:
             async with await get_db_connection() as conn:
