@@ -206,7 +206,8 @@ async def update_campaign_agent(
     updated = await svc.update_campaign(campaign_id, company_id, payload)
     if not updated:
         raise HTTPException(404, "Campaign not found")
-    
+
+
     return {"message": "Agent updated successfully", "campaign": updated}
 
 @router.get("/company/{company_id}", response_model=List[CampaignResponse])
@@ -332,9 +333,21 @@ async def update_campaign(
             if not user_membership:
                 raise HTTPException(403, "You don't have access to this campaign")
 
+    async with await get_db_connection() as conn2:
+        existing = await conn2.fetchrow('SELECT status FROM "campaign" WHERE id = $1', campaign_id)
+        prev_status = existing['status'] if existing else None
+
     updated = await svc.update_campaign(campaign_id, campaign_company_id, payload)
     if not updated:
         raise HTTPException(404, "Campaign not found")
+
+    try:
+        new_status = getattr(updated, "status", None) or (updated.get("status") if isinstance(updated, dict) else None)
+        if prev_status != new_status:
+            await svc.log_campaign_status_change(campaign_id, new_status)
+    except Exception:
+        logger.exception("Failed to write campaign status history for %s", campaign_id)
+
     try:
         if payload.status == "active":
             background_tasks.add_task(
@@ -345,10 +358,8 @@ async def update_campaign(
             )
     except Exception as e:
         logger.error(f"Failed to schedule activation background task for {campaign_id}: {e}")
-    
+
     return updated
-
-
 
 @router.delete("/{campaign_id}", status_code=204)
 async def delete_campaign(
