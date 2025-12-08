@@ -199,17 +199,46 @@ class AutoTicketService:
         return dict(ticket)
 
 
-    async def get_tickets_for_company(self, company_id: str, status_filter: Optional[List[str]] = None, limit: int = 50, offset: int = 0) -> Tuple[List[Dict[str, Any]], int]:
-        query = f'SELECT * FROM "Ticket" WHERE company_id=$1'
-        params = [company_id]
-        if status_filter:
-            query += " AND status = ANY($2)"
-            params.append(status_filter)
-        query += " ORDER BY created_at DESC LIMIT $3 OFFSET $4"
-        params.extend([limit, offset])
-        rows = await self.db.fetch(query, *params)
-        count_query = 'SELECT COUNT(*) FROM "Ticket" WHERE company_id=$1'
-        total = await self.db.fetchval(count_query, company_id)
+    async def get_tickets_for_company(
+        self,
+        company_id: str,
+        status_filter: Optional[List[str]] = None,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> Tuple[List[Dict[str, Any]], int]:
+
+        rows = await self.db.fetch(
+            '''
+            SELECT *
+            FROM "Ticket"
+            WHERE company_id = $1
+              AND (
+                $2::text[] IS NULL        -- no status filter
+                OR status = ANY($2::text[]) -- filter by list
+              )
+            ORDER BY created_at DESC
+            LIMIT $3 OFFSET $4
+            ''',
+            company_id,
+            status_filter,
+            limit,
+            offset,
+        )
+
+        total = await self.db.fetchval(
+            '''
+            SELECT COUNT(*)
+            FROM "Ticket"
+            WHERE company_id = $1
+              AND (
+                $2::text[] IS NULL
+                OR status = ANY($2::text[])
+              )
+            ''',
+            company_id,
+            status_filter,
+        )
+
         return [dict(r) for r in rows], total or 0
 
     async def get_ticket_details(self, ticket_id: str, company_id: str) -> Optional[Dict[str, Any]]:
