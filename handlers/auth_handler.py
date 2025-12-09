@@ -244,7 +244,7 @@ class AuthHandler:
         try:
             code = str(random.randint(100000, 999999))
             expires_at = datetime.utcnow() + timedelta(minutes=10)
-            
+
             await otp_repository.put_otp(otp_request.email, code, expires_at)
 
             await email_handler.send_otp_email(otp_request.email, code)
