@@ -2,6 +2,7 @@ import os
 import boto3
 from functools import lru_cache
 
+
 class DynamoClient:
     def __init__(self):
         self.region = os.getenv("AWS_REGION", "ap-south-1")
