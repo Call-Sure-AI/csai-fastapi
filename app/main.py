@@ -5,8 +5,7 @@ from routes.agent import router as agent_router
 from routes.company import router as company_router
 #from routes.conversation import conversation_router
 #from routes.customer import customer_router
-from routes.analytics import router as analytics_router
-from routes.conversation import router as conversation_router
+from app.services.analytics_realtime_service import analytics_realtime_service
 from routes.email import router as email_router
 from routes.invitation import router as invitation_router
 from routes.s3 import router as s3_router
@@ -303,6 +302,53 @@ async def metrics() -> str:
         logger.error(f"Failed to generate metrics: {e}")
         return "# Error generating metrics\n"
 
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Manage application lifecycle"""
+    # Startup
+    logger.info(f"Starting {APP_NAME} v{APP_VERSION} in {ENV} mode...")
+    
+    try:
+        # Initialize database connection pool
+        await postgres_client.initialize()
+        logger.info("Database connection pool initialized")
+        
+        # Check database connectivity
+        pool_stats = await postgres_client.client.get_pool_stats()
+        logger.info(f"Database pool stats: {pool_stats}")
+        
+        # START ANALYTICS REAL-TIME SERVICE - ADD THIS
+        try:
+            await analytics_realtime_service.start()
+            logger.info("Analytics real-time service started")
+        except Exception as e:
+            logger.error(f"Analytics real-time service failed to start: {e}")
+            # Don't fail the entire app if analytics service fails
+        
+    except Exception as e:
+        logger.error(f"Failed to initialize application: {e}")
+        raise
+    
+    yield
+    
+    # Shutdown
+    logger.info(f"Shutting down {APP_NAME}...")
+    
+    try:
+        # STOP ANALYTICS REAL-TIME SERVICE - ADD THIS
+        try:
+            await analytics_realtime_service.stop()
+            logger.info("Analytics real-time service stopped")
+        except Exception as e:
+            logger.error(f"Error stopping analytics service: {e}")
+        
+        # Close database connections
+        await postgres_client.close()
+        logger.info("Database connections closed")
+        
+    except Exception as e:
+        logger.error(f"Error during shutdown: {e}")
+
 # Development only routes
 if not IS_PRODUCTION:
     @app.get("/debug/routes", tags=["Debug"])
@@ -329,6 +375,8 @@ async def startup_message():
     📊 Metrics: http://localhost:8000/metrics
     💚 Health: http://localhost:8000/health
     📱 WhatsApp: http://localhost:8000/whatsapp/health
+    📈 Analytics WebSocket: ws://localhost:8000/api/analytics/ws/{{company_id}}
+    📉 Analytics REST: http://localhost:8000/api/analytics/current/{{company_id}}
     """)
 
 # For running with uvicorn directly
