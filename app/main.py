@@ -6,6 +6,7 @@ from routes.company import router as company_router
 #from routes.conversation import conversation_router
 #from routes.customer import customer_router
 from app.services.analytics_realtime_service import analytics_realtime_service
+from app.services.agent_number_realtime_service import agent_number_realtime_service
 from routes.email import router as email_router
 from routes.invitation import router as invitation_router
 from routes.s3 import router as s3_router
@@ -61,14 +62,30 @@ async def lifespan(app: FastAPI):
     try:
         # Initialize database connection pool
         await postgres_client.initialize()
-        logger.info("✅ Database connection pool initialized")
+        logger.info("Database connection pool initialized")
         
         # Check database connectivity
         pool_stats = await postgres_client.client.get_pool_stats()
-        logger.info(f"📊 Database pool stats: {pool_stats}")
+        logger.info(f"Database pool stats: {pool_stats}")
+        
+        # Start Analytics Real-time Service
+        try:
+            await analytics_realtime_service.start()
+            logger.info("Analytics real-time service started")
+        except Exception as e:
+            logger.error(f"Analytics real-time service failed to start: {e}")
+            # Don't fail the entire app if analytics service fails
+        
+        # Start AgentNumber Real-time Service
+        try:
+            await agent_number_realtime_service.start()
+            logger.info("AgentNumber real-time service started")
+        except Exception as e:
+            logger.error(f"AgentNumber real-time service failed to start: {e}")
+            # Don't fail the entire app if agent number service fails
         
     except Exception as e:
-        logger.error(f"❌ Failed to initialize application: {e}")
+        logger.error(f"Failed to initialize application: {e}")
         raise
     
     yield
@@ -77,12 +94,26 @@ async def lifespan(app: FastAPI):
     logger.info(f"Shutting down {APP_NAME}...")
     
     try:
+        # Stop AgentNumber Real-time Service
+        try:
+            await agent_number_realtime_service.stop()
+            logger.info("AgentNumber real-time service stopped")
+        except Exception as e:
+            logger.error(f"Error stopping agent number service: {e}")
+        
+        # Stop Analytics Real-time Service
+        try:
+            await analytics_realtime_service.stop()
+            logger.info("Analytics real-time service stopped")
+        except Exception as e:
+            logger.error(f"Error stopping analytics service: {e}")
+        
         # Close database connections
         await postgres_client.close()
-        logger.info("✅ Database connections closed")
+        logger.info("Database connections closed")
         
     except Exception as e:
-        logger.error(f"❌ Error during shutdown: {e}")
+        logger.error(f"Error during shutdown: {e}")
 
 # Create FastAPI instance
 app = FastAPI(
