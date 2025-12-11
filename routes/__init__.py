@@ -18,7 +18,8 @@ from .script import router as script_router
 from .voice import router as voice_router
 from .users import router as user_router
 from .analytics_realtime import router as analytics_realtime_router
-from .agent_number_realtime import router as agent_number_realtime_router
+from .agent_number import router as agent_number_router
+from .agent_stats_realtime import router as agent_stats_realtime_router
 
 # Create the main API router
 api_router = APIRouter()
@@ -44,7 +45,8 @@ api_router.include_router(script_router, tags=["Script"])
 api_router.include_router(voice_router, tags=["Voice Clone"])
 api_router.include_router(user_router, tags=["User Router"])
 api_router.include_router(analytics_realtime_router, tags=["Analytics Realtime"]) 
-api_router.include_router(agent_number_realtime_router, tags=["Agent Numbers Realtime"])
+api_router.include_router(agent_number_router, tags=["Agent Numbers"])
+api_router.include_router(agent_stats_realtime_router, tags=["Agent Statistics"])
 
 # You can also create versioned API routers
 v1_router = APIRouter()
@@ -67,6 +69,7 @@ v1_router.include_router(script_router, tags=["Script"])
 v1_router.include_router(voice_router, tags=["Voice Clone"])
 v1_router.include_router(user_router, tags=["User Router"])
 v1_router.include_router(analytics_realtime_router, tags=["Analytics Realtime"])
-v1_router.include_router(agent_number_realtime_router, tags=["Agent Numbers Realtime"])
+v1_router.include_router(agent_number_router, tags=["Agent Numbers"])
+v1_router.include_router(agent_stats_realtime_router, tags=["Agent Statistics"])
 
 __all__ = ["api_router", "v1_router"]
