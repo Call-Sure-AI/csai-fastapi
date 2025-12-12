@@ -24,7 +24,7 @@ class EmailHandler:
             # Create email message
             message = MIMEMultipart('alternative')
             message['Subject'] = email_request.subject
-            message['From'] = f"Callsure AI <noreply@callsure.ai>"
+            message['From'] = f"Callsure AI <noreply@callsure.co.in>"
             message['To'] = email_request.to
 
             # Add HTML content
@@ -42,7 +42,7 @@ class EmailHandler:
                 hostname='smtp.hostinger.com',
                 port=465,
                 use_tls=True,  # Use TLS/SSL
-                username='noreply@callsure.ai',
+                username='noreply@callsure.co.in',
                 password=os.getenv('SMTP_PASSWORD'),
             )
 
@@ -351,7 +351,7 @@ class EmailHandler:
                     <!-- Help Section -->
                     <div style="border-top: 1px solid #e5e7eb; padding-top: 20px; margin-top: 30px;">
                         <p style="color: #9ca3af; font-size: 12px; text-align: center; margin: 0;">
-                            Need help? Contact us at <a href="mailto:support@callsure.ai" style="color: #3362A6; text-decoration: none;">support@callsure.ai</a>
+                            Need help? Contact us at <a href="mailto:support@callsure.co.in" style="color: #3362A6; text-decoration: none;">support@callsure.co.in</a>
                         </p>
                     </div>
                 </div>
