@@ -1,3 +1,4 @@
+# routes/ticket.py
 from fastapi import APIRouter, Depends, HTTPException, Query, Body
 from typing import List, Optional, Dict, Any
 from app.db.postgres_client import get_db_connection
@@ -27,32 +28,66 @@ class TicketCloseRequest(BaseModel):
     resolution_notes: Optional[str] = None
     auto_resolved: bool = False
 
+class CreateTicketRequest(BaseModel):
+    customer_id: str
+    title: str
+    description: str
+    priority: Optional[str] = "medium"
+    status: Optional[str] = "new"
+    source: Optional[str] = "web_form"
+    tags: Optional[List[str]] = []
+    meta_data: Optional[Dict[str, Any]] = {}
+    customer_name: Optional[str] = None
+    customer_email: Optional[str] = None
+    customer_phone: Optional[str] = None
+
+
 @router.post("/companies/{company_id}/create")
 async def create_ticket(
     company_id: str,
-    ticket_data: Dict[str, Any] = Body(...),
+    ticket_data: CreateTicketRequest = Body(...),
     current_user: UserResponse = Depends(get_current_user),
     db_context = Depends(get_db_connection),
 ):
+    """Create a new ticket for a company"""
     async with db_context as db:
         ticket_service = AutoTicketService(db)
-        if ticket_data.get("company_id") != company_id:
-            raise HTTPException(
-                status_code=400, 
-                detail="Company ID mismatch between URL and ticket data"
-            )
         
         try:
-            created_ticket = await ticket_service.create_ticket(ticket_data)
+            # Generate ticket ID
+            ticket_id = f"TKT-{str(uuid.uuid4())[:8].upper()}"
+            
+            # Build ticket data dict
+            ticket_dict = {
+                "id": ticket_id,
+                "company_id": company_id,
+                "customer_id": ticket_data.customer_id,
+                "title": ticket_data.title,
+                "description": ticket_data.description,
+                "priority": ticket_data.priority or "medium",
+                "status": ticket_data.status or "new",
+                "source": ticket_data.source or "web_form",
+                "tags": ticket_data.tags or [],
+                "meta_data": ticket_data.meta_data or {},
+                "customer_name": ticket_data.customer_name,
+                "customer_email": ticket_data.customer_email,
+                "customer_phone": ticket_data.customer_phone,
+                "created_at": datetime.utcnow(),
+                "updated_at": datetime.utcnow(),
+            }
+            
+            created_ticket = await ticket_service.create_ticket(ticket_dict)
             return {
                 "message": "Ticket created successfully",
                 "ticket": created_ticket
             }
         except Exception as e:
+            logger.error(f"Error creating ticket: {str(e)}")
             raise HTTPException(
                 status_code=400,
                 detail=f"Failed to create ticket: {str(e)}"
             )
+
 
 @router.post("/companies/{company_id}/auto-create-from-conversation/{conversation_id}")
 async def auto_create_ticket_from_conversation(
@@ -111,7 +146,7 @@ async def auto_create_ticket_from_conversation(
             # Create ticket data matching your exact structure
             ticket_data = {
                 "id": f"TKT-{str(uuid.uuid4())[:8].upper()}",
-                "company_id": company_id,  # This matches the URL parameter
+                "company_id": company_id,
                 "customer_id": customer_id,
                 "title": analysis_result.suggested_title,
                 "description": analysis_result.suggested_description,
@@ -158,7 +193,6 @@ async def auto_create_ticket_from_conversation(
             )
 
 
-
 @router.post("/analyze-conversation/{conversation_id}")
 async def analyze_conversation_for_tickets(
     conversation_id: str,
@@ -194,15 +228,18 @@ async def analyze_conversation_for_tickets(
             detail=f"Analysis failed: {str(e)}"
         )
 
+
 @router.get("/companies/{company_id}")
 async def get_company_tickets(
     company_id: str,
     status: Optional[List[str]] = Query(None),
+    priority: Optional[List[str]] = Query(None),
     limit: int = Query(50, le=100),
     offset: int = Query(0, ge=0),
     current_user: UserResponse = Depends(get_current_user),
     db_context = Depends(get_db_connection),
 ):
+    """Get all tickets for a company with optional filters"""
     async with db_context as db:
         ticket_service = AutoTicketService(db)
         tickets, total_count = await ticket_service.get_tickets_for_company(
@@ -215,6 +252,108 @@ async def get_company_tickets(
             "offset": offset
         }
 
+
+@router.get("/companies/{company_id}/stats")
+async def get_ticket_statistics(
+    company_id: str,
+    days: int = Query(7, description="Number of days to analyze", ge=1, le=365),
+    current_user: UserResponse = Depends(get_current_user),
+    db_context = Depends(get_db_connection),
+):
+    """Get ticket statistics for a company"""
+    async with db_context as db:
+        try:
+            # Fixed query - using company_id instead of ticket_id
+            stats_query = '''
+                SELECT 
+                    COUNT(*) as total_tickets,
+                    COUNT(CASE WHEN status = 'new' THEN 1 END) as new_tickets,
+                    COUNT(CASE WHEN status = 'open' THEN 1 END) as open_tickets,
+                    COUNT(CASE WHEN status = 'in_progress' THEN 1 END) as in_progress_tickets,
+                    COUNT(CASE WHEN status = 'resolved' THEN 1 END) as resolved_tickets,
+                    COUNT(CASE WHEN status = 'closed' THEN 1 END) as closed_tickets,
+                    COUNT(CASE WHEN source = 'auto_generated' THEN 1 END) as auto_generated,
+                    COUNT(CASE WHEN source = 'email' THEN 1 END) as email_source,
+                    COUNT(CASE WHEN source = 'phone' THEN 1 END) as phone_source,
+                    COUNT(CASE WHEN source = 'chat' THEN 1 END) as chat_source,
+                    COUNT(CASE WHEN source = 'web_form' THEN 1 END) as web_form_source,
+                    COUNT(CASE WHEN priority = 'low' THEN 1 END) as low_priority,
+                    COUNT(CASE WHEN priority = 'medium' THEN 1 END) as medium_priority,
+                    COUNT(CASE WHEN priority = 'high' THEN 1 END) as high_priority,
+                    COUNT(CASE WHEN priority = 'critical' THEN 1 END) as critical_priority,
+                    AVG(CASE WHEN resolved_at IS NOT NULL THEN 
+                        EXTRACT(EPOCH FROM (resolved_at - created_at))/3600 
+                    END) as avg_resolution_hours
+                FROM "Ticket" 
+                WHERE company_id = $1 
+                AND created_at >= NOW() - INTERVAL '1 day' * $2
+            '''
+            
+            stats = await db.fetchrow(stats_query, company_id, days)
+            
+            if not stats:
+                # Return default stats if no data
+                return {
+                    "total_tickets": 0,
+                    "new_tickets": 0,
+                    "open_tickets": 0,
+                    "in_progress_tickets": 0,
+                    "resolved_tickets": 0,
+                    "closed_tickets": 0,
+                    "avg_resolution_time_hours": 0,
+                    "tickets_by_priority": {
+                        "low": 0,
+                        "medium": 0,
+                        "high": 0,
+                        "critical": 0
+                    },
+                    "tickets_by_source": {
+                        "auto_generated": 0,
+                        "email": 0,
+                        "phone": 0,
+                        "chat": 0,
+                        "web_form": 0
+                    }
+                }
+
+            # Format response to match frontend expectations
+            avg_hours = stats['avg_resolution_hours']
+            if avg_hours is not None:
+                avg_hours = round(float(avg_hours), 2)
+            else:
+                avg_hours = 0
+            
+            return {
+                "total_tickets": stats['total_tickets'] or 0,
+                "new_tickets": stats['new_tickets'] or 0,
+                "open_tickets": stats['open_tickets'] or 0,
+                "in_progress_tickets": stats['in_progress_tickets'] or 0,
+                "resolved_tickets": stats['resolved_tickets'] or 0,
+                "closed_tickets": stats['closed_tickets'] or 0,
+                "avg_resolution_time_hours": avg_hours,
+                "tickets_by_priority": {
+                    "low": stats['low_priority'] or 0,
+                    "medium": stats['medium_priority'] or 0,
+                    "high": stats['high_priority'] or 0,
+                    "critical": stats['critical_priority'] or 0
+                },
+                "tickets_by_source": {
+                    "auto_generated": stats['auto_generated'] or 0,
+                    "email": stats['email_source'] or 0,
+                    "phone": stats['phone_source'] or 0,
+                    "chat": stats['chat_source'] or 0,
+                    "web_form": stats['web_form_source'] or 0
+                }
+            }
+            
+        except Exception as e:
+            logger.error(f"Error getting ticket statistics: {e}")
+            raise HTTPException(
+                status_code=500,
+                detail=f"Failed to retrieve ticket statistics: {str(e)}"
+            )
+
+
 @router.get("/companies/{company_id}/{ticket_id}")
 async def get_ticket_details(
     company_id: str,
@@ -222,12 +361,14 @@ async def get_ticket_details(
     current_user: UserResponse = Depends(get_current_user),
     db_context = Depends(get_db_connection),
 ):
+    """Get details of a specific ticket"""
     async with db_context as db:
         ticket_service = AutoTicketService(db)
         ticket_details = await ticket_service.get_ticket_details(ticket_id, company_id)
         if not ticket_details:
             raise HTTPException(status_code=404, detail="Ticket not found")
         return ticket_details
+
 
 @router.patch("/companies/{company_id}/{ticket_id}")
 async def update_ticket(
@@ -237,6 +378,7 @@ async def update_ticket(
     current_user: UserResponse = Depends(get_current_user),
     db_context = Depends(get_db_connection),
 ):
+    """Update a ticket's status, priority, or assignment"""
     async with db_context as db:
         ticket_service = AutoTicketService(db)
         updated_by = current_user.email
@@ -248,6 +390,7 @@ async def update_ticket(
                 raise HTTPException(status_code=400, detail="Failed to update ticket")
         return {"message": "Ticket updated successfully"}
 
+
 @router.post("/companies/{company_id}/{ticket_id}/notes")
 async def add_ticket_note(
     company_id: str,
@@ -256,6 +399,7 @@ async def add_ticket_note(
     current_user: UserResponse = Depends(get_current_user),
     db_context = Depends(get_db_connection),
 ):
+    """Add a note to a ticket"""
     async with db_context as db:
         ticket_service = AutoTicketService(db)
         success = await ticket_service.add_ticket_note(
@@ -265,57 +409,6 @@ async def add_ticket_note(
             raise HTTPException(status_code=400, detail="Failed to add note")
         return {"message": "Note added successfully"}
 
-@router.get("/companies/{ticket_id}/stats")
-async def get_ticket_statistics(
-    company_id: str,
-    days: int = Query(7, description="Number of days to analyze", ge=1, le=365),
-    current_user: UserResponse = Depends(get_current_user),
-    db_context = Depends(get_db_connection),
-):
-    async with db_context as db:
-        stats_query = '''
-            SELECT 
-                COUNT(*) as total_tickets,
-                COUNT(CASE WHEN status = 'new' THEN 1 END) as new_tickets,
-                COUNT(CASE WHEN status = 'open' THEN 1 END) as open_tickets,
-                COUNT(CASE WHEN status = 'in_progress' THEN 1 END) as in_progress_tickets,
-                COUNT(CASE WHEN status = 'resolved' THEN 1 END) as resolved_tickets,
-                COUNT(CASE WHEN status = 'closed' THEN 1 END) as closed_tickets,
-                COUNT(CASE WHEN source = 'auto_generated' THEN 1 END) as auto_generated,
-                COUNT(CASE WHEN priority = 'critical' THEN 1 END) as critical_priority,
-                COUNT(CASE WHEN priority = 'high' THEN 1 END) as high_priority,
-                AVG(CASE WHEN resolved_at IS NOT NULL THEN 
-                    EXTRACT(EPOCH FROM (resolved_at - created_at))/3600 
-                END) as avg_resolution_hours
-            FROM "Ticket" 
-            WHERE ticket_id = $1 
-            AND created_at >= NOW() - INTERVAL '1 day' * $2
-        '''
-        
-        try:
-            stats = await db.fetchrow(stats_query, company_id, days)
-
-            statistics = dict(stats) if stats else {}
-
-            if statistics.get('avg_resolution_hours'):
-                statistics['avg_resolution_hours'] = round(float(statistics['avg_resolution_hours']), 2)
-            
-            return {
-                "company_id": company_id,
-                "period_days": days,
-                "date_range": {
-                    "from": f"NOW() - {days} days",
-                    "to": "NOW()"
-                },
-                "statistics": statistics
-            }
-            
-        except Exception as e:
-            logger.error(f"Error getting ticket statistics: {e}")
-            raise HTTPException(
-                status_code=500,
-                detail="Failed to retrieve ticket statistics"
-            )
 
 @router.patch("/companies/{company_id}/{ticket_id}/close")
 async def close_ticket(
