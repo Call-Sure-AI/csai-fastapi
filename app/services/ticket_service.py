@@ -242,16 +242,46 @@ class AutoTicketService:
 
         return [dict(r) for r in rows], total or 0
 
-    async def get_ticket_details(self, ticket_id: str, company_id: str) -> Optional[Dict[str, Any]]:
-        query = 'SELECT * FROM "Ticket" WHERE id=$1 AND company_id=$2'
-        ticket = await self.db.fetchrow(query, ticket_id, company_id)
-        if not ticket:
+    async def get_ticket_details(self, ticket_id: str, company_id: str) -> Optional[Dict]:
+        """Get ticket with all notes"""
+        try:
+            # Get ticket
+            ticket_query = '''
+                SELECT * FROM "Ticket" 
+                WHERE id = $1 AND company_id = $2
+            '''
+            ticket = await self.db.fetchrow(ticket_query, ticket_id, company_id)
+            
+            if not ticket:
+                return None
+            
+            # Get notes
+            notes_query = '''
+                SELECT id, ticket_id, content, author, is_internal, created_at 
+                FROM "TicketNote" 
+                WHERE ticket_id = $1 
+                ORDER BY created_at ASC
+            '''
+            notes = await self.db.fetch(notes_query, ticket_id)
+            
+            # Combine
+            ticket_dict = dict(ticket)
+            
+            # Manually map notes with correct field name
+            ticket_dict['notes'] = [{
+                'id': note['id'],
+                'ticket_id': note['ticket_id'],
+                'content': note['content'],
+                'created_by': note['author'],  # Map author -> created_by
+                'is_internal': note['is_internal'],
+                'created_at': note['created_at'].isoformat() if note['created_at'] else None
+            } for note in notes]
+            
+            return ticket_dict
+            
+        except Exception as e:
+            logger.error(f"Error getting ticket details: {e}")
             return None
-        notes_query = 'SELECT * FROM "TicketNote" WHERE ticket_id=$1 ORDER BY created_at ASC'
-        notes = await self.db.fetch(notes_query, ticket_id)
-        ticket_details = dict(ticket)
-        ticket_details["notes"] = [dict(n) for n in notes]
-        return ticket_details
 
     async def update_ticket_status(self, ticket_id: str, new_status: str, company_id: str, updated_by: str, note: Optional[str] = None) -> bool:
         update_query = 'UPDATE "Ticket" SET status=$1, updated_at=NOW() WHERE id=$2 AND company_id=$3'
