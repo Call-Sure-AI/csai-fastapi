@@ -380,15 +380,77 @@ async def update_ticket(
 ):
     """Update a ticket's status, priority, or assignment"""
     async with db_context as db:
-        ticket_service = AutoTicketService(db)
-        updated_by = current_user.email
-        if update_data.status:
-            success = await ticket_service.update_ticket_status(
-                ticket_id, update_data.status, company_id, updated_by, update_data.note
-            )
-            if not success:
-                raise HTTPException(status_code=400, detail="Failed to update ticket")
-        return {"message": "Ticket updated successfully"}
+        try:
+            updated_by = current_user.email
+            updates_made = []
+            
+            # Build dynamic update query
+            update_fields = []
+            params = []
+            param_index = 1
+            
+            if update_data.status is not None:
+                update_fields.append(f"status = ${param_index}")
+                params.append(update_data.status)
+                param_index += 1
+                updates_made.append("status")
+            
+            if update_data.priority is not None:
+                update_fields.append(f"priority = ${param_index}")
+                params.append(update_data.priority)
+                param_index += 1
+                updates_made.append("priority")
+            
+            if update_data.assigned_to is not None:
+                update_fields.append(f"assigned_to = ${param_index}")
+                params.append(update_data.assigned_to)
+                param_index += 1
+                updates_made.append("assigned_to")
+            
+            if not update_fields:
+                raise HTTPException(status_code=400, detail="No valid fields to update")
+            
+            # Always update the updated_at timestamp
+            update_fields.append(f"updated_at = ${param_index}")
+            params.append(datetime.utcnow())
+            param_index += 1
+            
+            # Add ticket_id and company_id to params
+            params.append(ticket_id)
+            params.append(company_id)
+            
+            update_query = f'''
+                UPDATE "Ticket" 
+                SET {", ".join(update_fields)}
+                WHERE id = ${param_index} AND company_id = ${param_index + 1}
+                RETURNING *
+            '''
+            
+            result = await db.fetchrow(update_query, *params)
+            
+            if not result:
+                raise HTTPException(status_code=404, detail="Ticket not found")
+            
+            # Add note if provided
+            if update_data.note:
+                note_content = f"Updated {', '.join(updates_made)} by {updated_by}: {update_data.note}"
+                note_query = '''
+                    INSERT INTO "TicketNote" (id, ticket_id, content, author, is_internal, created_at) 
+                    VALUES ($1, $2, $3, $4, TRUE, NOW())
+                '''
+                await db.execute(note_query, str(uuid.uuid4()), ticket_id, note_content, updated_by)
+            
+            return {
+                "message": "Ticket updated successfully",
+                "updated_fields": updates_made,
+                "ticket": dict(result)
+            }
+            
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.error(f"Error updating ticket {ticket_id}: {e}")
+            raise HTTPException(status_code=500, detail=f"Failed to update ticket: {str(e)}")
 
 
 @router.post("/companies/{company_id}/{ticket_id}/notes")
