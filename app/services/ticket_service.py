@@ -2,10 +2,8 @@
 import logging
 from typing import List, Dict, Any, Optional, Tuple
 from datetime import datetime
-from app.models.tickets import Ticket, TicketNote, TicketStatus, TicketPriority, TicketSource, ConversationAnalysisResult
-from app.models.conversation import Conversation
+from app.models.tickets import TicketStatus, TicketPriority, ConversationAnalysisResult
 from app.db.postgres_client import get_db_connection
-from sqlalchemy import select, update
 import uuid
 import json
 
@@ -38,42 +36,73 @@ class AutoTicketService:
         new_value: str = None
     ) -> None:
         """Add a history entry for a ticket"""
-        query = '''
-            INSERT INTO "TicketHistory" (id, ticket_id, action, field_name, old_value, new_value, changed_by, created_at)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, NOW())
-        '''
-        await self.db.execute(
-            query, 
-            str(uuid.uuid4()),
-            ticket_id, 
-            action, 
-            field_name, 
-            old_value, 
-            new_value, 
-            changed_by
-        )
+        try:
+            query = '''
+                INSERT INTO "TicketHistory" (id, ticket_id, action, field_name, old_value, new_value, changed_by, created_at)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, NOW())
+            '''
+            await self.db.execute(
+                query, 
+                str(uuid.uuid4()),
+                ticket_id, 
+                action, 
+                field_name, 
+                old_value, 
+                new_value, 
+                changed_by
+            )
+            logger.info(f"History entry added for ticket {ticket_id}: {action}")
+        except Exception as e:
+            logger.error(f"Error adding history entry: {e}")
 
     async def get_ticket_history(self, ticket_id: str) -> List[Dict]:
         """Get history for a ticket"""
-        query = '''
-            SELECT id, ticket_id, action, field_name, old_value, new_value, changed_by, created_at
-            FROM "TicketHistory"
-            WHERE ticket_id = $1
-            ORDER BY created_at DESC
-        '''
-        rows = await self.db.fetch(query, ticket_id)
-        return [{
-            'id': str(row['id']),
-            'ticket_id': row['ticket_id'],
-            'action': row['action'],
-            'field_name': row['field_name'],
-            'old_value': row['old_value'],
-            'new_value': row['new_value'],
-            'changed_by': row['changed_by'],
-            'created_at': row['created_at'].isoformat() if row['created_at'] else None
-        } for row in rows]
+        try:
+            query = '''
+                SELECT id, ticket_id, action, field_name, old_value, new_value, changed_by, created_at
+                FROM "TicketHistory"
+                WHERE ticket_id = $1
+                ORDER BY created_at DESC
+            '''
+            rows = await self.db.fetch(query, ticket_id)
+            return [{
+                'id': str(row['id']),
+                'ticket_id': row['ticket_id'],
+                'action': row['action'],
+                'field_name': row['field_name'],
+                'old_value': row['old_value'],
+                'new_value': row['new_value'],
+                'changed_by': row['changed_by'],
+                'created_at': row['created_at'].isoformat() if row['created_at'] else None
+            } for row in rows]
+        except Exception as e:
+            logger.error(f"Error getting ticket history: {e}")
+            return []
 
-    # ==================== TICKET METHODS ====================
+    # ==================== TEAM MEMBERS ====================
+
+    async def get_team_members(self, company_id: str) -> List[Dict]:
+        """Get team members for ticket assignment"""
+        try:
+            query = '''
+                SELECT u.id, u.email, u.name, cm.role
+                FROM "User" u
+                JOIN "CompanyMember" cm ON u.id = cm.user_id
+                WHERE cm.company_id = $1
+                ORDER BY u.name ASC, u.email ASC
+            '''
+            rows = await self.db.fetch(query, company_id)
+            return [{
+                'id': str(row['id']),
+                'email': row['email'],
+                'name': row['name'] or row['email'],
+                'role': row['role'] or 'member'
+            } for row in rows]
+        except Exception as e:
+            logger.error(f"Error getting team members: {e}")
+            return []
+
+    # ==================== TICKET ANALYSIS ====================
 
     async def analyze_conversation_for_tickets(
         self, 
@@ -209,6 +238,8 @@ class AutoTicketService:
     def _extract_customer_name(self, conversation: dict) -> Optional[str]:
         metadata = conversation.get("meta_data") or {}
         return metadata.get("customer_name") or metadata.get("client_info", {}).get("name")
+
+    # ==================== TICKET CRUD ====================
 
     async def create_ticket(self, ticket_data: dict, created_by: str = None) -> dict:
         processed_data = {}
@@ -495,27 +526,4 @@ class AutoTicketService:
             
         except Exception as e:
             logger.error(f"Error getting closable tickets for company {company_id}: {e}")
-            return []
-
-    # ==================== TEAM MEMBERS FOR ASSIGNMENT ====================
-    
-    async def get_team_members(self, company_id: str) -> List[Dict]:
-        """Get team members for ticket assignment"""
-        try:
-            query = '''
-                SELECT id, email, name, role 
-                FROM "User" 
-                WHERE company_id = $1 
-                AND is_active = true
-                ORDER BY name ASC
-            '''
-            rows = await self.db.fetch(query, company_id)
-            return [{
-                'id': row['id'],
-                'email': row['email'],
-                'name': row['name'] or row['email'],
-                'role': row['role']
-            } for row in rows]
-        except Exception as e:
-            logger.error(f"Error getting team members: {e}")
             return []
