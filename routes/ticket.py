@@ -353,7 +353,8 @@ async def get_team_members(
     async with db_context as db:
         ticket_service = AutoTicketService(db)
         members = await ticket_service.get_team_members(company_id)
-        return {"team_members": members}
+        # Return array directly, not wrapped in object
+        return members
 
 
 @router.get("/companies/{company_id}/{ticket_id}")
@@ -434,17 +435,20 @@ async def update_ticket(
             
             if update_data.assigned_to is not None:
                 # Log history for assignment change
+                old_assigned = current_ticket['assigned_to']
+                new_assigned = update_data.assigned_to if update_data.assigned_to != "" else None
+                
                 await ticket_service.add_history_entry(
                     ticket_id=ticket_id,
                     action='assigned',
                     changed_by=updated_by,
                     field_name='assigned_to',
-                    old_value=current_ticket['assigned_to'],
-                    new_value=update_data.assigned_to if update_data.assigned_to != "" else None
+                    old_value=old_assigned,
+                    new_value=new_assigned
                 )
                 update_fields.append(f"assigned_to = ${param_index}")
                 # Handle empty string as unassign
-                params.append(update_data.assigned_to if update_data.assigned_to != "" else None)
+                params.append(new_assigned)
                 param_index += 1
                 updates_made.append("assigned_to")
             
