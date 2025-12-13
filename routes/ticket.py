@@ -54,10 +54,8 @@ async def create_ticket(
         ticket_service = AutoTicketService(db)
         
         try:
-            # Generate ticket ID
             ticket_id = f"TKT-{str(uuid.uuid4())[:8].upper()}"
             
-            # Build ticket data dict
             ticket_dict = {
                 "id": ticket_id,
                 "company_id": company_id,
@@ -76,7 +74,7 @@ async def create_ticket(
                 "updated_at": datetime.utcnow(),
             }
             
-            created_ticket = await ticket_service.create_ticket(ticket_dict)
+            created_ticket = await ticket_service.create_ticket(ticket_dict, created_by=current_user.email)
             return {
                 "message": "Ticket created successfully",
                 "ticket": created_ticket
@@ -102,10 +100,8 @@ async def auto_create_ticket_from_conversation(
         try:
             ticket_service = AutoTicketService(db)
             
-            # Get conversation details for customer info
             conversation_details = None
             try:
-                # Try Conversation table first
                 conv_query = """
                 SELECT call_id, user_phone, agent_id, created_at 
                 FROM Conversation WHERE call_id = $1
@@ -113,7 +109,6 @@ async def auto_create_ticket_from_conversation(
                 conversation_details = await db.fetchrow(conv_query, conversation_id)
                 
                 if not conversation_details:
-                    # Try Conversation_Outcome table
                     outcome_query = """
                     SELECT call_id, user_phone, agent_id, created_at 
                     FROM Conversation_Outcome WHERE call_id = $1
@@ -123,7 +118,6 @@ async def auto_create_ticket_from_conversation(
             except Exception as e:
                 logger.warning(f"Could not fetch conversation details: {str(e)}")
             
-            # Analyze conversation
             analysis_result = await ticket_service.analyze_conversation_for_tickets(
                 conversation_id, latest_messages
             )
@@ -135,7 +129,6 @@ async def auto_create_ticket_from_conversation(
                     "confidence_score": analysis_result.confidence_score if analysis_result else 0
                 }
 
-            # Create customer_id (matching your format)
             customer_id = None
             if conversation_details and conversation_details.get('user_phone'):
                 phone_clean = str(conversation_details['user_phone']).replace('+', '').replace('-', '').replace(' ', '')
@@ -143,7 +136,6 @@ async def auto_create_ticket_from_conversation(
             else:
                 customer_id = f"CUST-AUTO-{str(uuid.uuid4())[:8].upper()}"
 
-            # Create ticket data matching your exact structure
             ticket_data = {
                 "id": f"TKT-{str(uuid.uuid4())[:8].upper()}",
                 "company_id": company_id,
@@ -174,7 +166,7 @@ async def auto_create_ticket_from_conversation(
             }
             
             logger.info(f"Creating auto-ticket with data structure matching manual create")
-            created_ticket = await ticket_service.create_ticket(ticket_data)
+            created_ticket = await ticket_service.create_ticket(ticket_data, created_by="system")
             
             return {
                 "ticket_created": True,
@@ -263,7 +255,6 @@ async def get_ticket_statistics(
     """Get ticket statistics for a company"""
     async with db_context as db:
         try:
-            # Fixed query - using company_id instead of ticket_id
             stats_query = '''
                 SELECT 
                     COUNT(*) as total_tickets,
@@ -292,7 +283,6 @@ async def get_ticket_statistics(
             stats = await db.fetchrow(stats_query, company_id, days)
             
             if not stats:
-                # Return default stats if no data
                 return {
                     "total_tickets": 0,
                     "new_tickets": 0,
@@ -316,7 +306,6 @@ async def get_ticket_statistics(
                     }
                 }
 
-            # Format response to match frontend expectations
             avg_hours = stats['avg_resolution_hours']
             if avg_hours is not None:
                 avg_hours = round(float(avg_hours), 2)
@@ -354,6 +343,19 @@ async def get_ticket_statistics(
             )
 
 
+@router.get("/companies/{company_id}/team-members")
+async def get_team_members(
+    company_id: str,
+    current_user: UserResponse = Depends(get_current_user),
+    db_context = Depends(get_db_connection),
+):
+    """Get team members for ticket assignment"""
+    async with db_context as db:
+        ticket_service = AutoTicketService(db)
+        members = await ticket_service.get_team_members(company_id)
+        return {"team_members": members}
+
+
 @router.get("/companies/{company_id}/{ticket_id}")
 async def get_ticket_details(
     company_id: str,
@@ -384,26 +386,65 @@ async def update_ticket(
             updated_by = current_user.email
             updates_made = []
             
+            # Get current ticket values for history
+            current_ticket = await db.fetchrow(
+                'SELECT status, priority, assigned_to FROM "Ticket" WHERE id = $1 AND company_id = $2',
+                ticket_id, company_id
+            )
+            
+            if not current_ticket:
+                raise HTTPException(status_code=404, detail="Ticket not found")
+            
+            ticket_service = AutoTicketService(db)
+            
             # Build dynamic update query
             update_fields = []
             params = []
             param_index = 1
             
             if update_data.status is not None:
+                # Log history for status change
+                await ticket_service.add_history_entry(
+                    ticket_id=ticket_id,
+                    action='status_changed',
+                    changed_by=updated_by,
+                    field_name='status',
+                    old_value=current_ticket['status'],
+                    new_value=update_data.status
+                )
                 update_fields.append(f"status = ${param_index}")
                 params.append(update_data.status)
                 param_index += 1
                 updates_made.append("status")
             
             if update_data.priority is not None:
+                # Log history for priority change
+                await ticket_service.add_history_entry(
+                    ticket_id=ticket_id,
+                    action='priority_changed',
+                    changed_by=updated_by,
+                    field_name='priority',
+                    old_value=current_ticket['priority'],
+                    new_value=update_data.priority
+                )
                 update_fields.append(f"priority = ${param_index}")
                 params.append(update_data.priority)
                 param_index += 1
                 updates_made.append("priority")
             
             if update_data.assigned_to is not None:
+                # Log history for assignment change
+                await ticket_service.add_history_entry(
+                    ticket_id=ticket_id,
+                    action='assigned',
+                    changed_by=updated_by,
+                    field_name='assigned_to',
+                    old_value=current_ticket['assigned_to'],
+                    new_value=update_data.assigned_to if update_data.assigned_to != "" else None
+                )
                 update_fields.append(f"assigned_to = ${param_index}")
-                params.append(update_data.assigned_to)
+                # Handle empty string as unassign
+                params.append(update_data.assigned_to if update_data.assigned_to != "" else None)
                 param_index += 1
                 updates_made.append("assigned_to")
             
@@ -428,17 +469,21 @@ async def update_ticket(
             
             result = await db.fetchrow(update_query, *params)
             
-            if not result:
-                raise HTTPException(status_code=404, detail="Ticket not found")
-            
             # Add note if provided
             if update_data.note:
-                note_content = f"Updated {', '.join(updates_made)} by {updated_by}: {update_data.note}"
+                note_content = f"Updated {', '.join(updates_made)}: {update_data.note}"
                 note_query = '''
                     INSERT INTO "TicketNote" (id, ticket_id, content, author, is_internal, created_at) 
                     VALUES ($1, $2, $3, $4, TRUE, NOW())
                 '''
                 await db.execute(note_query, str(uuid.uuid4()), ticket_id, note_content, updated_by)
+                
+                # Also log note addition to history
+                await ticket_service.add_history_entry(
+                    ticket_id=ticket_id,
+                    action='note_added',
+                    changed_by=updated_by
+                )
             
             return {
                 "message": "Ticket updated successfully",
