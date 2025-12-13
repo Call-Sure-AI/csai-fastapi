@@ -1,4 +1,4 @@
-# app\services\ticket_service.py
+# app/services/ticket_service.py
 import logging
 from typing import List, Dict, Any, Optional, Tuple
 from datetime import datetime
@@ -26,6 +26,55 @@ class AutoTicketService:
             "low": ["minor", "small", "tiny", "cosmetic"]
         }
 
+    # ==================== HISTORY METHODS ====================
+    
+    async def add_history_entry(
+        self, 
+        ticket_id: str, 
+        action: str, 
+        changed_by: str,
+        field_name: str = None,
+        old_value: str = None,
+        new_value: str = None
+    ) -> None:
+        """Add a history entry for a ticket"""
+        query = '''
+            INSERT INTO "TicketHistory" (id, ticket_id, action, field_name, old_value, new_value, changed_by, created_at)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, NOW())
+        '''
+        await self.db.execute(
+            query, 
+            str(uuid.uuid4()),
+            ticket_id, 
+            action, 
+            field_name, 
+            old_value, 
+            new_value, 
+            changed_by
+        )
+
+    async def get_ticket_history(self, ticket_id: str) -> List[Dict]:
+        """Get history for a ticket"""
+        query = '''
+            SELECT id, ticket_id, action, field_name, old_value, new_value, changed_by, created_at
+            FROM "TicketHistory"
+            WHERE ticket_id = $1
+            ORDER BY created_at DESC
+        '''
+        rows = await self.db.fetch(query, ticket_id)
+        return [{
+            'id': str(row['id']),
+            'ticket_id': row['ticket_id'],
+            'action': row['action'],
+            'field_name': row['field_name'],
+            'old_value': row['old_value'],
+            'new_value': row['new_value'],
+            'changed_by': row['changed_by'],
+            'created_at': row['created_at'].isoformat() if row['created_at'] else None
+        } for row in rows]
+
+    # ==================== TICKET METHODS ====================
+
     async def analyze_conversation_for_tickets(
         self, 
         conversation_id: str, 
@@ -50,7 +99,7 @@ class AutoTicketService:
                             agent_id, 
                             'completed' as status, 
                             created_at,
-                            id,  -- Add the id field
+                            id,
                             conversation_duration as duration,
                             outcome
                         FROM Conversation_Outcome WHERE call_id = $1
@@ -118,7 +167,6 @@ class AutoTicketService:
                 reason=f"Analysis failed: {str(e)}"
             )
 
-
     def _determine_priority(self, text: str) -> str:
         for priority, keywords in self.urgency_keywords.items():
             if any(keyword in text for keyword in keywords):
@@ -162,7 +210,7 @@ class AutoTicketService:
         metadata = conversation.get("meta_data") or {}
         return metadata.get("customer_name") or metadata.get("client_info", {}).get("name")
 
-    async def create_ticket(self, ticket_data: dict) -> dict:
+    async def create_ticket(self, ticket_data: dict, created_by: str = None) -> dict:
         processed_data = {}
         for key, value in ticket_data.items():
             if key == 'meta_data':
@@ -197,8 +245,20 @@ class AutoTicketService:
         
         query = f'INSERT INTO "Ticket" ({columns}) VALUES ({placeholders}) RETURNING *'
         ticket = await self.db.fetchrow(query, *values)
-        return dict(ticket)
-
+        ticket_dict = dict(ticket)
+        
+        # Log ticket creation in history
+        if created_by:
+            await self.add_history_entry(
+                ticket_id=ticket_dict['id'],
+                action='created',
+                changed_by=created_by,
+                field_name=None,
+                old_value=None,
+                new_value=None
+            )
+        
+        return ticket_dict
 
     async def get_tickets_for_company(
         self,
@@ -214,8 +274,8 @@ class AutoTicketService:
             FROM "Ticket"
             WHERE company_id = $1
               AND (
-                $2::text[] IS NULL        -- no status filter
-                OR status = ANY($2::text[]) -- filter by list
+                $2::text[] IS NULL
+                OR status = ANY($2::text[])
               )
             ORDER BY created_at DESC
             LIMIT $3 OFFSET $4
@@ -243,7 +303,7 @@ class AutoTicketService:
         return [dict(r) for r in rows], total or 0
 
     async def get_ticket_details(self, ticket_id: str, company_id: str) -> Optional[Dict]:
-        """Get ticket with all notes"""
+        """Get ticket with all notes and history"""
         try:
             # Get ticket
             ticket_query = '''
@@ -264,18 +324,24 @@ class AutoTicketService:
             '''
             notes = await self.db.fetch(notes_query, ticket_id)
             
+            # Get history
+            history = await self.get_ticket_history(ticket_id)
+            
             # Combine
             ticket_dict = dict(ticket)
             
-            # Manually map notes with correct field name
+            # Map notes with correct field name
             ticket_dict['notes'] = [{
                 'id': note['id'],
                 'ticket_id': note['ticket_id'],
                 'content': note['content'],
-                'created_by': note['author'],  # Map author -> created_by
+                'created_by': note['author'],
                 'is_internal': note['is_internal'],
                 'created_at': note['created_at'].isoformat() if note['created_at'] else None
             } for note in notes]
+            
+            # Add history
+            ticket_dict['history'] = history
             
             return ticket_dict
             
@@ -284,8 +350,26 @@ class AutoTicketService:
             return None
 
     async def update_ticket_status(self, ticket_id: str, new_status: str, company_id: str, updated_by: str, note: Optional[str] = None) -> bool:
+        # Get old status for history
+        old_ticket = await self.db.fetchrow(
+            'SELECT status FROM "Ticket" WHERE id=$1 AND company_id=$2',
+            ticket_id, company_id
+        )
+        old_status = old_ticket['status'] if old_ticket else None
+        
         update_query = 'UPDATE "Ticket" SET status=$1, updated_at=NOW() WHERE id=$2 AND company_id=$3'
         result = await self.db.execute(update_query, new_status, ticket_id, company_id)
+        
+        # Log history
+        await self.add_history_entry(
+            ticket_id=ticket_id,
+            action='status_changed',
+            changed_by=updated_by,
+            field_name='status',
+            old_value=old_status,
+            new_value=new_status
+        )
+        
         if note:
             note_query = 'INSERT INTO "TicketNote" (id, ticket_id, content, author, is_internal, created_at) VALUES ($1, $2, $3, $4, TRUE, NOW())'
             await self.db.execute(note_query, str(uuid.uuid4()), ticket_id, note, updated_by)
@@ -298,6 +382,14 @@ class AutoTicketService:
             return False
         note_query = 'INSERT INTO "TicketNote" (id, ticket_id, content, author, is_internal, created_at) VALUES ($1, $2, $3, $4, $5, NOW())'
         await self.db.execute(note_query, str(uuid.uuid4()), ticket_id, content, author, is_internal)
+        
+        # Log history
+        await self.add_history_entry(
+            ticket_id=ticket_id,
+            action='note_added',
+            changed_by=author
+        )
+        
         return True
 
     async def close_ticket(
@@ -321,10 +413,11 @@ class AutoTicketService:
                 logger.warning(f"Ticket {ticket_id} not found for company {company_id}")
                 return False
 
-            if ticket['status'] == TicketStatus.CLOSED:
+            if ticket['status'] == 'closed':
                 logger.info(f"Ticket {ticket_id} is already closed")
                 return False
 
+            old_status = ticket['status']
             close_timestamp = datetime.utcnow()
             update_query = '''
                 UPDATE "Ticket" 
@@ -339,13 +432,23 @@ class AutoTicketService:
             
             await self.db.execute(
                 update_query,
-                TicketStatus.CLOSED,
+                'closed',
                 close_timestamp,
                 close_timestamp,
                 auto_resolved,
                 resolution_notes,
                 ticket_id,
                 company_id
+            )
+
+            # Log history
+            await self.add_history_entry(
+                ticket_id=ticket_id,
+                action='closed',
+                changed_by=closed_by,
+                field_name='status',
+                old_value=old_status,
+                new_value='closed'
             )
 
             if reason:
@@ -362,7 +465,6 @@ class AutoTicketService:
             logger.error(f"Error closing ticket {ticket_id}: {e}")
             raise
 
-
     async def _add_system_note(self, ticket_id: str, content: str, author: str) -> None:
         """Add a system-generated note to a ticket"""
         note_query = '''
@@ -376,7 +478,6 @@ class AutoTicketService:
             content, 
             author
         )
-
 
     async def get_closable_tickets(self, company_id: str, limit: int = 50) -> List[Dict[str, Any]]:
         try:
@@ -394,4 +495,27 @@ class AutoTicketService:
             
         except Exception as e:
             logger.error(f"Error getting closable tickets for company {company_id}: {e}")
+            return []
+
+    # ==================== TEAM MEMBERS FOR ASSIGNMENT ====================
+    
+    async def get_team_members(self, company_id: str) -> List[Dict]:
+        """Get team members for ticket assignment"""
+        try:
+            query = '''
+                SELECT id, email, name, role 
+                FROM "User" 
+                WHERE company_id = $1 
+                AND is_active = true
+                ORDER BY name ASC
+            '''
+            rows = await self.db.fetch(query, company_id)
+            return [{
+                'id': row['id'],
+                'email': row['email'],
+                'name': row['name'] or row['email'],
+                'role': row['role']
+            } for row in rows]
+        except Exception as e:
+            logger.error(f"Error getting team members: {e}")
             return []
