@@ -47,7 +47,7 @@ api_router.include_router(user_router, tags=["User Router"])
 api_router.include_router(analytics_realtime_router, tags=["Analytics Realtime"]) 
 api_router.include_router(agent_number_router, tags=["Agent Numbers"])
 api_router.include_router(agent_stats_realtime_router, tags=["Agent Statistics"])
-app.include_router(phone_numbers_router, prefix="/phone-numbers", tags=["Phone Numbers"])
+api_router.include_router(phone_numbers_router, prefix="/phone-numbers", tags=["Phone Numbers"])
 
 # You can also create versioned API routers
 v1_router = APIRouter()
@@ -72,5 +72,6 @@ v1_router.include_router(user_router, tags=["User Router"])
 v1_router.include_router(analytics_realtime_router, tags=["Analytics Realtime"])
 v1_router.include_router(agent_number_router, tags=["Agent Numbers"])
 v1_router.include_router(agent_stats_realtime_router, tags=["Agent Statistics"])
+v1_router.include_router(phone_numbers_router, prefix="/phone-numbers", tags=["Phone Numbers"])
 
 __all__ = ["api_router", "v1_router"]
