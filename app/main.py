@@ -12,7 +12,8 @@ from routes.s3 import router as s3_router
 from routes.ticket import router as ticket_router
 from routes.campaigns import router as campaign_router
 from routes.voice import router as voice_router
-from routes.whatsapp import router as whatsapp_router  # ADD THIS LINE!
+from routes.whatsapp import router as whatsapp_router
+from routes.phone_numbers import router as phone_numbers_router
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.trustedhost import TrustedHostMiddleware
 from fastapi.middleware.gzip import GZipMiddleware

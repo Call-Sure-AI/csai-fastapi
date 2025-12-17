@@ -20,7 +20,7 @@ from .users import router as user_router
 from .analytics_realtime import router as analytics_realtime_router
 from .agent_number import router as agent_number_router
 from .agent_stats_realtime import router as agent_stats_realtime_router
-
+from .phone_numbers import router as phone_numbers_router
 # Create the main API router
 api_router = APIRouter()
 
@@ -47,6 +47,7 @@ api_router.include_router(user_router, tags=["User Router"])
 api_router.include_router(analytics_realtime_router, tags=["Analytics Realtime"]) 
 api_router.include_router(agent_number_router, tags=["Agent Numbers"])
 api_router.include_router(agent_stats_realtime_router, tags=["Agent Statistics"])
+app.include_router(phone_numbers_router, prefix="/phone-numbers", tags=["Phone Numbers"])
 
 # You can also create versioned API routers
 v1_router = APIRouter()
