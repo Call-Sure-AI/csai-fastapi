@@ -24,14 +24,14 @@ CREATE TABLE IF NOT EXISTS phone_numbers (
     phone_number VARCHAR(20) NOT NULL,
     friendly_name VARCHAR(100),
     provider VARCHAR(20) NOT NULL CHECK (provider IN ('twilio', 'exotel', 'plivo')),
-    provider_sid VARCHAR(100),  -- Twilio's SID for the number
+    provider_sid VARCHAR(100),
     
-    -- Connection to agent
-    agent_id UUID REFERENCES agents(id) ON DELETE SET NULL,
+    -- Connection to agent (stored as string, no FK constraint)
+    agent_id VARCHAR(100),
     agent_name VARCHAR(255),
     
-    -- Company ownership
-    company_id UUID NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+    -- Company ownership (stored as string, no FK constraint)
+    company_id VARCHAR(100) NOT NULL,
     
     -- Status and billing
     status VARCHAR(20) DEFAULT 'active' CHECK (status IN ('active', 'inactive', 'pending', 'deleted')),
@@ -45,7 +45,7 @@ CREATE TABLE IF NOT EXISTS phone_numbers (
     -- Capabilities
     capabilities JSONB DEFAULT '{"voice": true, "sms": false, "mms": false}',
     
-    -- Provider credentials (encrypted in production)
+    -- Provider credentials (should be encrypted in production)
     credentials JSONB,
     
     -- Webhook configuration
