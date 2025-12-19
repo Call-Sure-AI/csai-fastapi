@@ -1438,6 +1438,22 @@ class CampaignService:
             
             return config
 
+    async def _get_agent_from_number(self, agent_id: str) -> str:
+        async with await get_db_connection() as conn:
+            row = await conn.fetchrow(
+                """
+                SELECT phone_number, service_type
+                FROM agentnumber
+                WHERE agent_id = $1
+                """,
+                agent_id
+            )
+
+            if not row or not row["phone_number"]:
+                raise ValueError(f"No phone number assigned to agent {agent_id}")
+
+            return (row["phone_number"], row["service_type"])
+
     async def create_or_update_slot_configuration(
         self,
         campaign_id: str,
@@ -1566,6 +1582,7 @@ async def _process_campaign_on_activate(campaign_id: str, company_id: str, user_
             Initiates a single outbound call attempt and returns:
             {"success": bool, "call_sid": str|None, "processor_status": str|None, "to_number": str, "lead_id": str}
             """
+            from_number, provider = await svc._get_agent_from_number(agent_id)
             lead_id = lead.get("id")
             phone_raw = (lead.get("phone") or "").strip()
             country_code_raw = str(lead.get("country_code") or "").strip()
@@ -1583,8 +1600,10 @@ async def _process_campaign_on_activate(campaign_id: str, company_id: str, user_
             else:
                 to_number = f"+{phone_digits}" if not phone_raw.startswith("+") else phone_raw
 
+
             customer_name = (lead.get("first_name") or "").strip()
             payload = {
+                "from_number": from_number,
                 "to_number": to_number,
                 "company_id": company_id,
                 "agent_id": agent_id,
@@ -1597,7 +1616,7 @@ async def _process_campaign_on_activate(campaign_id: str, company_id: str, user_
                 async with sem:
                     async with httpx.AsyncClient(timeout=30.0) as client:
                         resp = await client.post(
-                            "https://processor.callsure.ai/api/v1/twilio-elevenlabs/initiate-outbound-call",
+                            "https://processor.callsure.ai/api/v1/calls/outbound?provider={provider}",
                             json=payload,
                             headers={"Content-Type": "application/json"}
                         )
