@@ -87,7 +87,6 @@ class Config:
     TWILIO_AUTH_TOKEN = os.getenv('TWILIO_AUTH_TOKEN')
     TWILIO_SID = os.getenv('TWILIO_ACCOUNT_SID')
 
-
 class DevelopmentConfig(Config):
     DEBUG = True
     
