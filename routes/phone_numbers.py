@@ -7,7 +7,6 @@ Rules:
 - Numbers stored in AgentNumber table
 """
 
-
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
 from typing import Optional, Literal
