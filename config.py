@@ -5,7 +5,11 @@ load_dotenv()
 
 class Config:
     # Core Application
+    # Core Application
     SECRET_KEY = os.getenv('SECRET_KEY', 'your-secret-key')
+    JWT_SECRET = os.getenv('JWT_SECRET', 'secret')
+    PORT = int(os.getenv('PORT', 8080))
+    FRONTEND_URL = os.getenv('FRONTEND_URL', 'http://localhost:3000')
     JWT_SECRET = os.getenv('JWT_SECRET', 'secret')
     PORT = int(os.getenv('PORT', 8080))
     FRONTEND_URL = os.getenv('FRONTEND_URL', 'http://localhost:3000')
@@ -17,6 +21,20 @@ class Config:
     GOOGLE_CLIENT_ID = os.getenv('GOOGLE_CLIENT_ID')
     GOOGLE_CLIENT_SECRET = os.getenv('GOOGLE_CLIENT_SECRET')
     
+    # GitHub Configuration
+    GITHUB_TOKEN = os.getenv('GITHUB_TOKEN')
+    
+    # AWS Configuration
+    AWS_ACCESS_KEY_ID = os.getenv('AWS_ACCESS_KEY_ID')
+    AWS_SECRET_ACCESS_KEY = os.getenv('AWS_SECRET_ACCESS_KEY')
+    AWS_REGION = os.getenv('AWS_REGION', 'ap-south-1')
+    AWS_BUCKET_NAME = os.getenv('AWS_BUCKET_NAME')
+    S3_BUCKET_NAME = os.getenv('S3_BUCKET_NAME', os.getenv('AWS_BUCKET_NAME'))  # Fallback to AWS_BUCKET_NAME
+    
+    # Email Configuration (Updated to match .env)
+    SMTP_HOST = os.getenv('SMTP_HOST', 'smtp.hostinger.com')
+    SMTP_PORT = int(os.getenv('SMTP_PORT', 465))
+    SMTP_USERNAME = os.getenv('SMTP_USERNAME', 'noreply@callsure.ai')
     # GitHub Configuration
     GITHUB_TOKEN = os.getenv('GITHUB_TOKEN')
     
@@ -80,6 +98,14 @@ config = {
     'production': ProductionConfig,
     'default': DevelopmentConfig
 }
+
+class ElevenLabsConfig:
+    def __init__(self):
+        self.api_key = os.getenv('ELEVENLABS_API_KEY')
+        if not self.api_key:
+            raise ValueError("ELEVENLABS_API_KEY is not set in the environment.")
+
+elevenlabs_config = ElevenLabsConfig()
 
 class ElevenLabsConfig:
     def __init__(self):
