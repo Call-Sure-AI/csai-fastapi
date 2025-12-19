@@ -62,6 +62,13 @@ class Config:
     FACEBOOK_VERSION = os.getenv('FACEBOOK_VERSION', 'v23.0')
     WHATSAPP_CONFIG_ID = os.getenv('WHATSAPP_CONFIG_ID')
 
+    EXOTEL_API_KEY = os.getenv('EXOTEL_API_KEY')
+    EXOTEL_TOKEN = os.getenv('EXOTEL_TOKEN')
+    EXOTEL_SID = os.getenv('EXOTEL_SID')
+
+    TWILIO_AUTH_TOKEN = os.getenv('TWILIO_AUTH_TOKEN')
+    TWILIO_SID = os.getenv('TWILIO_ACCOUNT_SID')
+
 class DevelopmentConfig(Config):
     DEBUG = True
     
