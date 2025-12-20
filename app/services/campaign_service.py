@@ -1577,7 +1577,7 @@ async def _process_campaign_on_activate(campaign_id: str, company_id: str, user_
 
         sem = asyncio.Semaphore(max_concurrent_calls)
 
-        async def dial_once_and_get_sid(lead: dict) -> dict:
+        async def dial_once_and_get_sid(lead: dict, svc: CampaignService) -> dict:
             """
             Initiates a single outbound call attempt and returns:
             {"success": bool, "call_sid": str|None, "processor_status": str|None, "to_number": str, "lead_id": str}
@@ -1669,7 +1669,7 @@ async def _process_campaign_on_activate(campaign_id: str, company_id: str, user_
                 attempts += 1
                 remaining_attempts -= 1
 
-                res = await dial_once_and_get_sid(lead)
+                res = await dial_once_and_get_sid(lead, svc)
                 last_call_sid = res.get("call_sid")
                 last_to_number = res.get("to_number")
                 last_processor_status = res.get("processor_status")
