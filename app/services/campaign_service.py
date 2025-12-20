@@ -1583,6 +1583,9 @@ async def _process_campaign_on_activate(campaign_id: str, company_id: str, user_
             {"success": bool, "call_sid": str|None, "processor_status": str|None, "to_number": str, "lead_id": str}
             """
             from_number, provider = await svc._get_agent_from_number(agent_id)
+            logger.info(f"Agent Id: {agent_id}")
+            logger.info(f"From Number: {from_number}")
+            logger.info(f"Provider: {provider}")
             lead_id = lead.get("id")
             phone_raw = (lead.get("phone") or "").strip()
             country_code_raw = str(lead.get("country_code") or "").strip()
@@ -1600,7 +1603,7 @@ async def _process_campaign_on_activate(campaign_id: str, company_id: str, user_
             else:
                 to_number = f"+{phone_digits}" if not phone_raw.startswith("+") else phone_raw
 
-
+            logger.info(f"To Number: {to_number}")
             customer_name = (lead.get("first_name") or "").strip()
             payload = {
                 "from_number": from_number,
