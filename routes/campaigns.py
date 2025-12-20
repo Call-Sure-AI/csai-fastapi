@@ -545,6 +545,7 @@ async def realtime_metrics(
 ):
     await _check_owner(campaign_id, current, ch)
     return await svc.get_realtime_metrics(campaign_id)
+    
 
 @router.get("/{campaign_id}/metrics/history")
 async def metrics_history(
