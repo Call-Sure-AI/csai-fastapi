@@ -28,11 +28,13 @@ from app.models.schemas import (
 )
 import asyncio
 import httpx
+from app.db.queries.activity_queries import ActivityQueries
 
 logger = logging.getLogger(__name__)
 
 class CampaignService:
     def __init__(self):
+        self.activity_queries = ActivityQueries()
         pass
 
     def _to_campaign_response(self, row: dict) -> CampaignResponse:
@@ -98,6 +100,23 @@ class CampaignService:
                     now,
                     now
                 )
+
+                try:
+                    await self.activity_queries.create_activity(
+                        conn=conn,
+                        user_id=created_by,
+                        action="CREATE",
+                        entity_type="CAMPAIGN",
+                        entity_id=campaign_id,
+                        metadata={
+                            "campaign_name": campaign_request.campaign_name,
+                            "company_id": company_id,
+                            "agent_id": agent_id or campaign_request.agent_id,
+                            "leads_count": len(leads)
+                        }
+                    )
+                except Exception as e:
+                    logger.warning(f"Campaign activity logging failed: {e}")
 
                 if leads:
                     await self._create_campaign_leads(conn, campaign_id, leads)
@@ -309,6 +328,23 @@ class CampaignService:
         RETURNING *;
         """
 
+        updated_fields = payload.dict(exclude_unset=True).keys()
+
+        try:
+            async with await get_db_connection() as conn:
+                await self.activity_queries.create_activity(
+                    conn=conn,
+                    user_id=company_id,
+                    action="UPDATE",
+                    entity_type="CAMPAIGN",
+                    entity_id=campaign_id,
+                    metadata={
+                        "updated_fields": list(updated_fields)
+                    }
+                )
+        except Exception as e:
+            logger.warning(f"Campaign update activity failed: {e}")
+
         async with await get_db_connection() as conn:
             row = await conn.fetchrow(query, *values)
             if not row:
@@ -318,9 +354,20 @@ class CampaignService:
 
     async def delete_campaign(self, campaign_id: str, company_id: str) -> bool:
         async with await get_db_connection() as conn:
+            campaign = await self.get_campaign(campaign_id, company_id)
             result = await conn.execute(
                 "DELETE FROM Campaign WHERE id = $1 AND company_id = $2",
                 campaign_id, company_id
+            )
+            await self.activity_queries.create_activity(
+                conn=conn,
+                user_id=company_id,
+                action="DELETE",
+                entity_type="CAMPAIGN",
+                entity_id=campaign_id,
+                metadata={
+                    "campaign_name": campaign.campaign_name if campaign else None
+                }
             )
             return result.startswith("DELETE 1")
 
@@ -1387,6 +1434,18 @@ class CampaignService:
                     campaign_id,
                     status,
                     now
+                )
+
+                await self.activity_queries.create_activity(
+                    conn=conn,
+                    user_id=user_id,
+                    action="UPDATE",
+                    entity_type="CAMPAIGN",
+                    entity_id=campaign_id,
+                    metadata={
+                        "old_status": old_status,
+                        "new_status": new_status
+                    }
                 )
                 return dict(rec) if rec else None
         except Exception as e:
