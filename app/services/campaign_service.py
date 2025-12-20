@@ -1438,21 +1438,17 @@ class CampaignService:
             
             return config
 
-    async def _get_agent_from_number(self, agent_id: str) -> str:
+    async def get_agent_from_number(self, agent_id: str) -> tuple:
+        """Get agent phone number and service provider"""
         async with await get_db_connection() as conn:
             row = await conn.fetchrow(
-                """
-                SELECT phone_number, service_type
-                FROM agentnumber
-                WHERE agent_id = $1
-                """,
+                'SELECT phone_number, service_type FROM "AgentNumber" WHERE agent_id = $1',
                 agent_id
             )
-
             if not row or not row["phone_number"]:
                 raise ValueError(f"No phone number assigned to agent {agent_id}")
+            return row["phone_number"], row["service_type"]
 
-            return (row["phone_number"], row["service_type"])
 
     async def create_or_update_slot_configuration(
         self,
@@ -1654,7 +1650,7 @@ async def _process_campaign_on_activate(campaign_id: str, company_id: str, user_
                     await svc._initiate_lead_call(campaign_id=campaign_id, lead_id=lead_id, to_number=to_number, call_sid=None, call_status='no-answer')
                 except Exception:
                     pass
-                return {"success": False, "call_sid": None, "processor_status": None, "to_number": to_number, "lead_id": lead_id}
+                return {"success": False, "call_sid": None, "processor_status": None, "to_number": None, "lead_id": lead_id}
 
         async def process_with_retries(lead: dict):
             lead_id = lead.get("id")
