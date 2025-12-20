@@ -1,4 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, BackgroundTasks, Query, WebSocket, WebSocketDisconnect
+from fastapi.encoders import jsonable_encoder
 from fastapi.responses import StreamingResponse, JSONResponse
 from typing import List, Optional, Any
 import uuid
@@ -537,15 +538,77 @@ async def _check_owner(c_id: str, user: UserResponse, ch: CompanyHandler):
     if not await svc.get_campaign(c_id, comp["id"]):
         raise HTTPException(404, "Campaign not found")
 
-@router.get("/{campaign_id}/metrics")
-async def realtime_metrics(
-    campaign_id: str,
-    current: UserResponse = Depends(get_current_user),
-    ch: CompanyHandler    = Depends(CompanyHandler),
+@router.websocket("/ws/{campaign_id}/metrics")
+async def campaign_metrics_websocket(
+    websocket: WebSocket,
+    campaign_id: str
 ):
-    await _check_owner(campaign_id, current, ch)
-    return await svc.get_realtime_metrics(campaign_id)
-    
+    await websocket.accept()
+    svc = CampaignService()
+
+    try:
+        while True:
+            bookings = await svc.get_bookings(campaign_id)
+            calls = await svc.get_campaign_calls_via_agents(campaign_id)
+            metrics = await svc.get_campaign_metrics_summary(campaign_id)
+            payload = {
+                "type": "campaign_metrics",
+                "campaign_id": campaign_id,
+                "metrics": {
+                    "contacted": metrics["contacted"],
+                    "responded": metrics["responded"],
+                    "response_rate": f'{metrics["response_rate"]}%',
+                    "booked": metrics["booked"],
+                    "converted": metrics["converted"],
+                    "conversion_rate": f'{metrics["conversion_rate"]}%',
+                    "avg_call_duration": f'{metrics["avg_call_duration_seconds"]}s'
+                },
+                "bookings": bookings,
+                "calls": calls
+            }
+
+            await websocket.send_json(jsonable_encoder(payload))
+
+            await asyncio.sleep(5)
+
+    except WebSocketDisconnect:
+        logger.info(f"Campaign metrics WS disconnected: {campaign_id}")
+
+@router.get("/{campaign_id}/metrics")
+async def get_campaign_metrics(
+    campaign_id: str,
+    current_user: UserResponse = Depends(get_current_user),
+    company_handler: CompanyHandler = Depends(CompanyHandler),
+):
+    company = await company_handler.get_company_by_user(current_user.id)
+    if not company:
+        raise HTTPException(400, "User has no company")
+
+    svc = CampaignService()
+
+    campaign = await svc.get_campaign(campaign_id, company["id"])
+    if not campaign:
+        raise HTTPException(404, "Campaign not found")
+
+    bookings = await svc.get_bookings(campaign_id)
+    calls = await svc.get_campaign_calls_via_agents(campaign_id)
+    metrics = await svc.get_campaign_metrics_summary(campaign_id)
+
+    return {
+        "metrics": {
+            "contacted": metrics["contacted"],
+            "responded": metrics["responded"],
+            "response_rate": f'{metrics["response_rate"]}%',
+            "booked": metrics["booked"],
+            "converted": metrics["converted"],
+            "conversion_rate": f'{metrics["conversion_rate"]}%',
+            "avg_call_duration": f'{metrics["avg_call_duration_seconds"]}s'
+        },
+        "bookings": bookings,
+        "calls": calls
+    }
+
+
 
 @router.get("/{campaign_id}/metrics/history")
 async def metrics_history(

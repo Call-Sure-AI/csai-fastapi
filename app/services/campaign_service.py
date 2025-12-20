@@ -373,11 +373,80 @@ class CampaignService:
         await asyncio.gather(*jobs)
         return len(agent_ids)
 
-    async def get_realtime_metrics(self, campaign_id: str) -> Dict[str, Any]:
-        sql = "SELECT * FROM v_campaign_realtime WHERE campaign_id = $1"
+    async def get_campaign_metrics_summary(self, campaign_id: str) -> dict:
         async with await get_db_connection() as conn:
-            row = await conn.fetchrow(sql, campaign_id)
-        return dict(row) if row else {}
+
+            # Calls (fully qualified columns)
+            calls = await conn.fetch("""
+                SELECT
+                    c.status      AS call_status,
+                    c.duration    AS duration,
+                    c.to_number   AS to_number
+                FROM "Call" c
+                JOIN "AgentNumber" an
+                    ON an.phone_number = c.from_number
+                JOIN "campaign" camp
+                    ON camp.agent_id = an.agent_id
+                WHERE camp.id = $1
+                  AND c.call_type = 'outgoing'
+            """, campaign_id)
+
+            # Bookings
+            bookings = await conn.fetch("""
+                SELECT customer_phone
+                FROM booking
+                WHERE campaign_id = $1
+            """, campaign_id)
+
+        contacted = len(calls)
+
+        responded = sum(
+            1 for c in calls
+            if c["call_status"] == "completed"
+        )
+
+        booking_phones = {
+            b["customer_phone"]
+            for b in bookings
+            if b["customer_phone"]
+        }
+
+        converted = sum(
+            1 for c in calls
+            if c["call_status"] == "completed"
+            and c["to_number"] in booking_phones
+        )
+
+        durations = [
+            c["duration"]
+            for c in calls
+            if c["duration"] is not None
+        ]
+
+        avg_duration = (
+            int(sum(durations) / len(durations))
+            if durations else 0
+        )
+
+        response_rate = round(
+            (responded / contacted) * 100, 2
+        ) if contacted else 0
+
+        conversion_rate = round(
+            (converted / contacted) * 100, 2
+        ) if contacted else 0
+
+        return {
+            "contacted": contacted,
+            "responded": responded,
+            "response_rate": response_rate,
+            "booked": len(bookings),
+            "converted": converted,
+            "conversion_rate": conversion_rate,
+            "avg_call_duration_seconds": avg_duration
+        }
+
+
 
     async def get_metrics_history(
         self, campaign_id: str, days_back: int = 30
@@ -1449,6 +1518,33 @@ class CampaignService:
                 raise ValueError(f"No phone number assigned to agent {agent_id}")
             return row["phone_number"], row["service_type"]
 
+    async def get_campaign_calls_via_agents(
+        self,
+        campaign_id: str,
+        limit: int = 100
+    ) -> List[Dict[str, Any]]:
+        """
+        Reverse flow:
+        Campaign -> Agent -> AgentNumber -> Call
+        """
+
+        sql = """
+        SELECT c.*
+        FROM "Call" c
+        JOIN "AgentNumber" an
+            ON an.phone_number = c.from_number
+        JOIN "campaign" camp
+            ON camp.agent_id = an.agent_id
+        WHERE camp.id = $1
+          AND c.call_type = 'outgoing'
+        ORDER BY c.created_at DESC
+        LIMIT $2
+        """
+
+        async with await get_db_connection() as conn:
+            rows = await conn.fetch(sql, campaign_id, limit)
+
+        return [dict(r) for r in rows]
 
     async def create_or_update_slot_configuration(
         self,
