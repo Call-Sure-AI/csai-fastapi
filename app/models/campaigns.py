@@ -112,6 +112,7 @@ class CreateCampaignRequest(BaseModel):
 class CampaignResponse(BaseModel):
     id: str
     agent_id: str | None = None
+    agent_name: str | None = None
     campaign_name: str
     description: Optional[str]
     company_id: str

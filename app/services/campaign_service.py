@@ -223,25 +223,33 @@ class CampaignService:
             return None
 
     async def get_campaigns_by_company(
-        self, 
-        company_id: str, 
-        limit: int = 50, 
+        self,
+        company_id: str,
+        limit: int = 50,
         offset: int = 0
     ) -> List[CampaignResponse]:
 
         try:
             async with await get_db_connection() as conn:
                 query = """
-                SELECT * FROM Campaign 
-                WHERE company_id = $1 
-                ORDER BY created_at DESC 
+                SELECT
+                    c.*,
+                    a.name AS agent_name
+                FROM Campaign c
+                LEFT JOIN "Agent" a
+                    ON a.id = c.agent_id
+                WHERE c.company_id = $1
+                ORDER BY c.created_at DESC
                 LIMIT $2 OFFSET $3
                 """
-                
-                campaigns = await conn.fetch(query, company_id, limit, offset)
-                
-                return [self._to_campaign_response(dict(campaign)) for campaign in campaigns]
-                
+
+                rows = await conn.fetch(query, company_id, limit, offset)
+
+                return [
+                    self._to_campaign_response(dict(row))
+                    for row in rows
+                ]
+
         except Exception as e:
             logger.error(f"Error fetching campaigns: {str(e)}")
             return []
