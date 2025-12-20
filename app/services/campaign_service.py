@@ -1582,11 +1582,13 @@ async def _process_campaign_on_activate(campaign_id: str, company_id: str, user_
             Initiates a single outbound call attempt and returns:
             {"success": bool, "call_sid": str|None, "processor_status": str|None, "to_number": str, "lead_id": str}
             """
-            from_number, provider = await svc._get_agent_from_number(agent_id)
-            logger.info(f"Agent Id: {agent_id}")
-            logger.info(f"From Number: {from_number}")
-            logger.info(f"Provider: {provider}")
             lead_id = lead.get("id")
+            try:
+                from_number, provider = await svc.get_agent_from_number(agent_id)
+                logger.info("[activate] Agent phone: %s, provider: %s", from_number, provider)
+            except Exception as e:
+                logger.error("[activate] Failed to get agent number for %s: %s", agent_id, e)
+                return {"success": False, "call_sid": None}
             phone_raw = (lead.get("phone") or "").strip()
             country_code_raw = str(lead.get("country_code") or "").strip()
             if not phone_raw:
