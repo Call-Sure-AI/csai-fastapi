@@ -877,7 +877,7 @@ class CampaignService:
             "template": "Hi {{first_name}}, let's connect!",
             "subject_line": "Quick chat about your business needs",
             "from_name": "Sales Team",
-            "from_email": "sales@company.com",
+            "from_email": "support@callsure.co.in",
             "enable_followup": True,
             "followup_delay_hours": 24,
             "max_followup_attempts": 3,
@@ -1616,7 +1616,7 @@ async def _process_campaign_on_activate(campaign_id: str, company_id: str, user_
                 async with sem:
                     async with httpx.AsyncClient(timeout=30.0) as client:
                         resp = await client.post(
-                            "https://processor.callsure.ai/api/v1/calls/outbound?provider={provider}",
+                            f"https://processor.callsure.ai/api/v1/calls/outbound?provider={provider}",
                             json=payload,
                             headers={"Content-Type": "application/json"}
                         )
@@ -1637,6 +1637,7 @@ async def _process_campaign_on_activate(campaign_id: str, company_id: str, user_
                     return {"success": True, "call_sid": call_sid, "processor_status": processor_status, "to_number": to_number, "lead_id": lead_id}
                 else:
                     try:
+                        logger.error("[activate] Call API failed: status=%s, body=%s, lead=%s", resp.status_code, resp.text, lead_id)
                         await svc._initiate_lead_call(campaign_id=campaign_id, lead_id=lead_id, to_number=to_number, call_sid=call_sid, call_status=processor_status or 'no-answer')
                     except Exception:
                         pass
@@ -1706,7 +1707,8 @@ async def _process_campaign_on_activate(campaign_id: str, company_id: str, user_
         tasks = [asyncio.create_task(process_with_retries(ld)) for ld in leads]
         await asyncio.gather(*tasks, return_exceptions=True)
 
-        logger.info(f"[activate] Completed dialing for campaign {campaign_id}")
+        logger.info(f"[activate] Completed dialing for campaign {campaign_id}: "
+            f"{len(leads)} leads processed, check individual call statuses above")
 
     except Exception as e:
         logger.exception(f"[activate] Unhandled exception for campaign {campaign_id}: {e}")
