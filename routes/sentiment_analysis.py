@@ -6,7 +6,7 @@ router = APIRouter()
 logger = logging.getLogger("routes.sentiment_analysis")
 
 
-@router.websocket("/api/sentiment-analysis/ws/{company_id}/{range}")
+@router.websocket("/ws/{company_id}/{range}")
 async def sentiment_analysis_ws(
     websocket: WebSocket,
     company_id: str,
