@@ -54,7 +54,7 @@ api_router.include_router(agent_stats_realtime_router, tags=["Agent Statistics"]
 api_router.include_router(phone_numbers_router, prefix="/phone-numbers", tags=["Phone Numbers"])
 api_router.include_router(company_metrics_router, prefix="/company-metrics", tags=["Company Metrics"])
 api_router.include_router(call_reports_router, prefix="/call_reports", tags=["Call Reports"])
-api_router.include_router(call_reports_router, prefix="/sentiment-analysis", tags=["Sentiment Analytics"])
+api_router.include_router(sentiment_router, prefix="/sentiment-analysis", tags=["Sentiment Analytics"])
 
 # You can also create versioned API routers
 v1_router = APIRouter()
@@ -82,6 +82,6 @@ v1_router.include_router(agent_stats_realtime_router, tags=["Agent Statistics"])
 v1_router.include_router(phone_numbers_router, prefix="/phone-numbers", tags=["Phone Numbers"])
 v1_router.include_router(company_metrics_router, prefix="/company-metrics", tags=["Company Metrics"])
 v1_router.include_router(call_reports_router, prefix="/call_reports", tags=["Call Reports"])
-v1_router.include_router(call_reports_router, prefix="/sentiment-analysis", tags=["Sentiment Analytics"])
+v1_router.include_router(sentiment_router, prefix="/sentiment-analysis", tags=["Sentiment Analytics"])
 
 __all__ = ["api_router", "v1_router"]
