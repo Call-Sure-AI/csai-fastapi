@@ -1,20 +1,14 @@
 from datetime import datetime, timedelta
 from typing import Dict, Any, Optional, List
 from decimal import Decimal
-import nltk
-from nltk.sentiment.vader import SentimentIntensityAnalyzer
 import json
 from urllib.parse import urlparse
 from handlers.s3_handler import S3Handler
 from app.db.postgres_client import get_db_connection
-from textblob import TextBlob
 import logging
 
 sentiment_logger = logging.getLogger("sentiment.pipeline")
 sentiment_logger.setLevel(logging.DEBUG)
-
-nltk.download("vader_lexicon")
-SIA = SentimentIntensityAnalyzer()
 
 s3_handler = S3Handler()
 
@@ -93,48 +87,6 @@ def compute_call_sentiment(transcript: dict | None) -> str:
 
     sentiment_logger.info(f"Final sentiment decided → {final}")
     return final
-
-"""async def fetch_transcript_text(transcript_url: str) -> str | None:
-    if not transcript_url:
-        return None
-
-    try:
-        key = extract_s3_key(transcript_url)
-        result = await s3_handler.download_file(key)
-        print(result)
-        if not result["success"]:
-            return None
-
-        content = result["data"].decode("utf-8")
-        data = json.loads(content)
-
-        if isinstance(data, dict):
-            if "text" in data:
-                return data["text"]
-
-            if "segments" in data and isinstance(data["segments"], list):
-                return " ".join(
-                    seg.get("text", "")
-                    for seg in data["segments"]
-                )
-
-        return None
-
-    except Exception as e:
-        logger.warning(f"Transcript fetch failed: {e}")
-        return None"""
-
-"""def sentiment(text: Optional[str]) -> str:
-    if not text:
-        return "Neutral"
-    score = SIA.polarity_scores(text)["compound"]
-    if score >= 0.05:
-        return "Positive"
-    if score <= -0.05:
-        return "Negative"
-    return "Neutral"
-    """
-
 
 def json_safe(v):
     if isinstance(v, Decimal):
