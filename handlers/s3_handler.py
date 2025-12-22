@@ -6,6 +6,8 @@ import boto3
 from botocore.exceptions import ClientError, NoCredentialsError
 from fastapi import UploadFile
 import logging
+from urllib.parse import urlparse
+import requests
 
 logger = logging.getLogger(__name__)
 
@@ -363,6 +365,23 @@ class S3Handler:
                 "error": str(e)
             }
 
+    def _parse_s3_url(self, s3_url: str):
+        """
+        Converts:
+        https://bucket.s3.region.amazonaws.com/path/to/file.json
+        OR s3://bucket/path/to/file.json
+        """
+        parsed = urlparse(s3_url)
+
+        if parsed.scheme == "s3":
+            bucket = parsed.netloc
+            key = parsed.path.lstrip("/")
+        else:
+            bucket = parsed.netloc.split(".")[0]
+            key = parsed.path.lstrip("/")
+
+        return bucket, key
+
     async def generate_presigned_url(
         self, 
         key: str, 
@@ -397,6 +416,50 @@ class S3Handler:
                 "success": False,
                 "error": str(e)
             }
+
+    def generate_presigned_get_url(
+        self,
+        bucket: str,
+        key: str,
+        expires_in: int = 300
+    ) -> str:
+        """
+        Generate a temporary signed URL for GET object
+        """
+        try:
+            return self.s3_client.generate_presigned_url(
+                ClientMethod="get_object",
+                Params={
+                    "Bucket": bucket,
+                    "Key": key
+                },
+                ExpiresIn=expires_in
+            )
+        except Exception as e:
+            logger.error(f"Failed to generate presigned URL: {e}", exc_info=True)
+            raise
+
+    def download_json_via_presigned_url(self, s3_url: str) -> dict | None:
+        """
+        Downloads JSON from S3 using a presigned URL
+        """
+        try:
+            bucket, key = self._parse_s3_url(s3_url)
+
+            presigned_url = self.generate_presigned_get_url(
+                bucket=bucket,
+                key=key,
+                expires_in=300
+            )
+
+            response = requests.get(presigned_url, timeout=5)
+            response.raise_for_status()
+
+            return response.json()
+
+        except Exception as e:
+            logger.warning(f"Transcript fetch failed (presigned): {e}")
+            return None
 
     async def get_file_url(self, key: str, public: bool = True) -> str:
         if public:

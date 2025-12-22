@@ -7,6 +7,11 @@ import json
 from urllib.parse import urlparse
 from handlers.s3_handler import S3Handler
 from app.db.postgres_client import get_db_connection
+from textblob import TextBlob
+import logging
+
+sentiment_logger = logging.getLogger("sentiment.pipeline")
+sentiment_logger.setLevel(logging.DEBUG)
 
 nltk.download("vader_lexicon")
 SIA = SentimentIntensityAnalyzer()
@@ -21,8 +26,75 @@ def extract_s3_key(url: str) -> str:
     parsed = urlparse(url)
     return parsed.path.lstrip("/")
 
+def compute_call_sentiment(transcript: dict | None) -> str:
+    sentiment_logger.debug("compute_call_sentiment: start")
 
-async def fetch_transcript_text(transcript_url: str) -> str | None:
+    if not transcript:
+        sentiment_logger.warning("Transcript is None → Neutral")
+        return "Neutral"
+
+    conversation = transcript.get("conversation")
+    if not conversation:
+        sentiment_logger.warning(
+            f"Transcript has no conversation | keys={list(transcript.keys())}"
+        )
+        return "Neutral"
+
+    sentiment_score = {
+        "positive": 1,
+        "neutral": 0,
+        "negative": -1
+    }
+
+    total_score = 0.0
+    total_weight = 0.0
+
+    for idx, turn in enumerate(conversation):
+        role = turn.get("role")
+        sentiment = turn.get("sentiment")
+        readiness = turn.get("buying_readiness", 50)
+
+        sentiment_logger.debug(
+            f"Turn[{idx}] role={role} sentiment={sentiment} readiness={readiness}"
+        )
+
+        if role != "user":
+            continue
+
+        if sentiment not in sentiment_score:
+            sentiment_logger.warning(
+                f"Turn[{idx}] sentiment missing/invalid | keys={list(turn.keys())}"
+            )
+            continue
+
+        weight = readiness / 100.0
+        total_score += sentiment_score[sentiment] * weight
+        total_weight += weight
+
+    sentiment_logger.debug(
+        f"Sentiment aggregation | total_score={total_score} total_weight={total_weight}"
+    )
+
+    if total_weight == 0:
+        sentiment_logger.warning(
+            "No valid sentiment found in conversation → Neutral"
+        )
+        return "Neutral"
+
+    avg = total_score / total_weight
+    sentiment_logger.debug(f"Sentiment average score={avg}")
+
+    if avg >= 0.2:
+        final = "Positive"
+    elif avg <= -0.2:
+        final = "Negative"
+    else:
+        final = "Neutral"
+
+    sentiment_logger.info(f"Final sentiment decided → {final}")
+    return final
+
+"""async def fetch_transcript_text(transcript_url: str) -> str | None:
     if not transcript_url:
         return None
 
@@ -50,9 +122,9 @@ async def fetch_transcript_text(transcript_url: str) -> str | None:
 
     except Exception as e:
         logger.warning(f"Transcript fetch failed: {e}")
-        return None
+        return None"""
 
-def sentiment(text: Optional[str]) -> str:
+"""def sentiment(text: Optional[str]) -> str:
     if not text:
         return "Neutral"
     score = SIA.polarity_scores(text)["compound"]
@@ -61,6 +133,7 @@ def sentiment(text: Optional[str]) -> str:
     if score <= -0.05:
         return "Negative"
     return "Neutral"
+    """
 
 
 def json_safe(v):
@@ -184,9 +257,45 @@ class CallReportsService:
 
         result = []
 
-        print(rows[0])
         for r in rows:
-            transcript_text = await fetch_transcript_text(r["transcription"])
+            call_sid = r["call_sid"]
+            transcription_url = r["transcription"]
+
+            sentiment_logger.info(
+                f"Processing call | call_sid={call_sid} | transcription_url={transcription_url}"
+            )
+
+            sentiment = "Neutral"
+
+            if transcription_url:
+                try:
+                    transcript_json = s3_handler.download_json_via_presigned_url(
+                        transcription_url
+                    )
+
+                    if not transcript_json:
+                        sentiment_logger.warning(
+                            f"S3 returned empty JSON | call_sid={call_sid}"
+                        )
+
+                    else:
+                        sentiment_logger.debug(
+                            f"Transcript JSON keys | call_sid={call_sid} | keys={list(transcript_json.keys())}"
+                        )
+
+                        # IMPORTANT: your transcripts are already FULL JSON
+                        sentiment = compute_call_sentiment(transcript_json)
+
+                except Exception as e:
+                    sentiment_logger.error(
+                        f"Transcript processing failed | call_sid={call_sid} | error={e}",
+                        exc_info=True
+                    )
+            else:
+                sentiment_logger.warning(
+                    f"No transcription URL | call_sid={call_sid}"
+                )
+
             result.append({
                 "caller_phone": r["to_number"],
                 "datetime": r["created_at"],
@@ -194,7 +303,7 @@ class CallReportsService:
                 "type": "Inbound" if r["call_type"] == "incoming" else "Outbound",
                 "agent": r["agent_name"] or "AI Agent",
                 "outcome": "Escalated" if r["escalated"] else "Resolved",
-                "sentiment": sentiment(transcript_text),
+                "sentiment": sentiment,
             })
 
         return result

@@ -19,3 +19,4 @@ aiohttp==3.12.15
 pandas
 openpyxl
 nltk
+textblob
