@@ -76,13 +76,13 @@ async def lifespan(app: FastAPI):
             logger.error(f"Analytics real-time service failed to start: {e}")
             # Don't fail the entire app if analytics service fails
         
-        # Start AgentNumber Real-time Service
-        try:
-            await agent_number_realtime_service.start()
-            logger.info("AgentNumber real-time service started")
-        except Exception as e:
-            logger.error(f"AgentNumber real-time service failed to start: {e}")
-            # Don't fail the entire app if agent number service fails
+        # # Start AgentNumber Real-time Service
+        # try:
+        #     await agent_number_realtime_service.start()
+        #     logger.info("AgentNumber real-time service started")
+        # except Exception as e:
+        #     logger.error(f"AgentNumber real-time service failed to start: {e}")
+        #     # Don't fail the entire app if agent number service fails
         
     except Exception as e:
         logger.error(f"Failed to initialize application: {e}")
