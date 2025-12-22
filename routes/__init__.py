@@ -21,6 +21,7 @@ from .analytics_realtime import router as analytics_realtime_router
 from .agent_number import router as agent_number_router
 from .agent_stats_realtime import router as agent_stats_realtime_router
 from .phone_numbers import router as phone_numbers_router
+from .company_metrics import router as company_metrics_router
 # Create the main API router
 api_router = APIRouter()
 
@@ -48,6 +49,7 @@ api_router.include_router(analytics_realtime_router, tags=["Analytics Realtime"]
 api_router.include_router(agent_number_router, tags=["Agent Numbers"])
 api_router.include_router(agent_stats_realtime_router, tags=["Agent Statistics"])
 api_router.include_router(phone_numbers_router, prefix="/phone-numbers", tags=["Phone Numbers"])
+api_router.include_router(company_metrics_router, prefix="/company-metrics", tags=["Company Metrics"])
 
 # You can also create versioned API routers
 v1_router = APIRouter()
@@ -73,5 +75,6 @@ v1_router.include_router(analytics_realtime_router, tags=["Analytics Realtime"])
 v1_router.include_router(agent_number_router, tags=["Agent Numbers"])
 v1_router.include_router(agent_stats_realtime_router, tags=["Agent Statistics"])
 v1_router.include_router(phone_numbers_router, prefix="/phone-numbers", tags=["Phone Numbers"])
+v1_router.include_router(company_metrics_router, prefix="/company-metrics", tags=["Company Metrics"])
 
 __all__ = ["api_router", "v1_router"]
