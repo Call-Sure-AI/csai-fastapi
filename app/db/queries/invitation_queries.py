@@ -6,8 +6,7 @@ import uuid
 import logging
 
 logger = logging.getLogger(__name__)
-# REMOVE THIS LINE - it's importing itself!
-# from app.db.queries.invitation_queries import InvitationQueries
+
 
 class InvitationQueries:
     
