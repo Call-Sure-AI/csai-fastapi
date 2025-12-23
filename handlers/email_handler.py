@@ -6,61 +6,89 @@ from fastapi import HTTPException
 from pydantic import BaseModel, EmailStr
 from typing import Optional
 from app.models.schemas import EmailRequest, EmailResponse
+import logging
+
+logger = logging.getLogger(__name__)
 
 class EmailHandler:
     """Email handling controsller for sending emails"""
     
     @staticmethod
     async def send_email(email_request: EmailRequest) -> EmailResponse:
-        """Send email using SMTP"""
         try:
-            # Validate required fields (Pydantic already handles this, but explicit check)
             if not email_request.to or not email_request.subject or not email_request.html:
                 raise HTTPException(
-                    status_code=400, 
+                    status_code=400,
                     detail="Missing required fields: to, subject, html"
                 )
 
-            # Create email message
-            message = MIMEMultipart('alternative')
-            message['Subject'] = email_request.subject
-            message['From'] = f"Callsure AI <noreply@callsure.co.in>"
-            message['To'] = email_request.to
+            smtp_host = os.getenv("SMTP_HOST")
+            smtp_port = int(os.getenv("SMTP_PORT", 465))
+            smtp_user = os.getenv("SMTP_USERNAME")
+            smtp_pass = os.getenv("SMTP_PASSWORD")
+            use_tls = os.getenv("SMTP_USE_TLS", "true").lower() == "true"
 
-            # Add HTML content
-            html_part = MIMEText(email_request.html, 'html')
-            message.attach(html_part)
+            sender_name = os.getenv("SENDER_NAME", "Callsure AI")
+            sender_email = os.getenv("SENDER_EMAIL")
+            reply_to = os.getenv("REPLY_TO_EMAIL")
 
-            # Add text content if provided
+            if not all([smtp_host, smtp_port, smtp_user, smtp_pass, sender_email]):
+                raise RuntimeError("SMTP configuration incomplete")
+
+            logger.info(
+                "SMTP send start | host=%s port=%s user=%s tls=%s to=%s",
+                smtp_host, smtp_port, smtp_user, use_tls, email_request.to
+            )
+
+            # Build email
+            message = MIMEMultipart("alternative")
+            message["Subject"] = email_request.subject
+            message["From"] = f"{sender_name} <{sender_email}>"
+            message["To"] = email_request.to
+            if reply_to:
+                message["Reply-To"] = reply_to
+
+            message.attach(MIMEText(email_request.html, "html"))
+
             if email_request.text:
-                text_part = MIMEText(email_request.text, 'plain')
-                message.attach(text_part)
+                message.attach(MIMEText(email_request.text, "plain"))
 
-            # Send email using aiosmtplib
+            # Send
             await aiosmtplib.send(
                 message,
-                hostname='smtp.hostinger.com',
-                port=465,
-                use_tls=True,  # Use TLS/SSL
-                username='noreply@callsure.co.in',
-                password=os.getenv('SMTP_PASSWORD'),
+                hostname=smtp_host,
+                port=smtp_port,
+                username=smtp_user,
+                password=smtp_pass,
+                use_tls=use_tls,
+                timeout=10,
             )
+
+            logger.info("SMTP send success | to=%s", email_request.to)
 
             return EmailResponse(
                 success=True,
                 message="Email sent successfully"
             )
 
-        except aiosmtplib.SMTPException as smtp_error:
-            print(f'SMTP error: {smtp_error}')
+        except aiosmtplib.SMTPAuthenticationError as e:
+            logger.error("SMTP AUTH FAILED | %s", e)
             raise HTTPException(
-                status_code=500, 
-                detail=f"SMTP error: {str(smtp_error)}"
+                status_code=500,
+                detail="SMTP authentication failed. Check username/password."
             )
-        except Exception as error:
-            print(f'Send email error: {error}')
+
+        except aiosmtplib.SMTPException as e:
+            logger.error("SMTP ERROR | %s", e)
             raise HTTPException(
-                status_code=500, 
+                status_code=500,
+                detail=f"SMTP error: {str(e)}"
+            )
+
+        except Exception as e:
+            logger.exception("EMAIL SEND FAILED")
+            raise HTTPException(
+                status_code=500,
                 detail="Internal server error"
             )
         
