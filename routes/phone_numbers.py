@@ -122,7 +122,7 @@ async def _get_verified_bundle(company_id: str, country_code: str) -> Optional[s
             ORDER BY created_at DESC
             LIMIT 1
             """,
-            company_id, country_code
+            [company_id, country_code]
         )
         return result['twilio_bundle_sid'] if result else None
         
@@ -142,7 +142,7 @@ async def _get_address_status(company_id: str, country_code: str) -> dict:
             ORDER BY created_at DESC
             LIMIT 1
             """,
-            company_id, country_code
+            [company_id, country_code]
         )
         
         if not result:

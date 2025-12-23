@@ -142,12 +142,14 @@ async def submit_to_twilio_background(
                     updated_at = $5
                 WHERE id = $6
                 """,
-                result.get("address_sid"),
-                result.get("bundle_sid"),
-                result.get("end_user_sid"),
-                result.get("regulation_sid"),
-                datetime.utcnow(),
-                address_id
+                [
+                    result.get("address_sid"),
+                    result.get("bundle_sid"),
+                    result.get("end_user_sid"),
+                    result.get("regulation_sid"),
+                    datetime.utcnow(),
+                    address_id
+                ]
             )
             logger.info(f"✅ Successfully submitted address {address_id} to Twilio. Bundle: {result.get('bundle_sid')}")
         else:
@@ -160,9 +162,7 @@ async def submit_to_twilio_background(
                     updated_at = $2
                 WHERE id = $3
                 """,
-                result.get("error", "Unknown error"),
-                datetime.utcnow(),
-                address_id
+                [result.get("error", "Unknown error"), datetime.utcnow(), address_id]
             )
             logger.error(f"❌ Failed to submit address {address_id} to Twilio: {result.get('error')}")
         
@@ -175,9 +175,7 @@ async def submit_to_twilio_background(
                 SET status = 'failed', rejection_reason = $1, updated_at = $2
                 WHERE id = $3
                 """,
-                str(e),
-                datetime.utcnow(),
-                address_id
+                [str(e), datetime.utcnow(), address_id]
             )
         except Exception as db_err:
             logger.error(f"Failed to update address status: {db_err}")
@@ -207,7 +205,7 @@ async def create_address(
             SELECT id, status FROM regulatory_addresses 
             WHERE company_id = $1 AND country_code = $2 AND status NOT IN ('rejected', 'failed')
             """,
-            company_id, address.country_code
+            [company_id, address.country_code]
         )
         
         if existing:
@@ -233,11 +231,13 @@ async def create_address(
             )
             RETURNING *
             """,
-            address_id, company_id, address.country_code, address.business_name,
-            address.address_line2, address.street_address, address.city,
-            address.region, address.postal_code, address.contact_name,
-            address.contact_email, address.contact_phone,
-            'pending', now, now
+            [
+                address_id, company_id, address.country_code, address.business_name,
+                address.address_line2, address.street_address, address.city,
+                address.region, address.postal_code, address.contact_name,
+                address.contact_email, address.contact_phone,
+                'pending', now, now
+            ]
         )
         
         # Add background task to submit to Twilio
@@ -311,7 +311,7 @@ async def get_addresses(
                 WHERE company_id = $1 AND country_code = $2
                 ORDER BY created_at DESC
                 """,
-                company_id, country_code
+                [company_id, country_code]
             )
         else:
             results = await postgres_client.client.execute_query(
@@ -321,7 +321,7 @@ async def get_addresses(
                 WHERE company_id = $1
                 ORDER BY created_at DESC
                 """,
-                company_id
+                [company_id]
             )
         
         return [
@@ -356,7 +356,7 @@ async def get_address(
             """
             SELECT * FROM regulatory_addresses WHERE id = $1
             """,
-            address_id
+            [address_id]
         )
         
         if not result:
@@ -403,7 +403,7 @@ async def delete_address(
         # Check address exists and status
         result = await postgres_client.client.execute_query_one(
             "SELECT status FROM regulatory_addresses WHERE id = $1",
-            address_id
+            [address_id]
         )
         
         if not result:
@@ -417,7 +417,7 @@ async def delete_address(
         
         await postgres_client.client.execute_query(
             "DELETE FROM regulatory_addresses WHERE id = $1",
-            address_id
+            [address_id]
         )
         
         return {"message": "Address deleted successfully"}
@@ -443,7 +443,7 @@ async def retry_address_submission(
             """
             SELECT * FROM regulatory_addresses WHERE id = $1
             """,
-            address_id
+            [address_id]
         )
         
         if not result:
@@ -464,7 +464,7 @@ async def retry_address_submission(
                 twilio_end_user_sid = NULL, updated_at = $1
             WHERE id = $2
             """,
-            datetime.utcnow(), address_id
+            [datetime.utcnow(), address_id]
         )
         
         # Queue background task
@@ -528,7 +528,7 @@ async def twilio_bundle_status_webhook(payload: TwilioWebhookPayload):
             WHERE twilio_bundle_sid = $4
             RETURNING id, company_id, country_code, contact_email
             """,
-            new_status, payload.FailureReason, datetime.utcnow(), payload.BundleSid
+            [new_status, payload.FailureReason, datetime.utcnow(), payload.BundleSid]
         )
         
         if result:
@@ -565,7 +565,7 @@ async def get_verified_bundle(
             ORDER BY created_at DESC
             LIMIT 1
             """,
-            company_id, country_code.upper()
+            [company_id, country_code.upper()]
         )
         
         if not result or not result.get('twilio_bundle_sid'):
