@@ -19,7 +19,7 @@ from handlers.company_handler import CompanyHandler
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/api/regulatory", tags=["Regulatory"])
+router = APIRouter(prefix="/regulatory", tags=["Regulatory"])
 
 
 # ============== Schemas ==============
