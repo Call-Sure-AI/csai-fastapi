@@ -10,6 +10,7 @@ import logging
 
 logger = logging.getLogger(__name__)
 
+
 class EmailHandler:
     """Email handling controsller for sending emails"""
     
