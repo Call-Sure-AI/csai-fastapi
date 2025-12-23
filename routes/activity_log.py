@@ -21,29 +21,24 @@ async def activity_log_ws(
             f"Activity Log WS connected | company_id={company_id}"
         )
 
-        # ---------- QUERY PARAMS ----------
         range_param = websocket.query_params.get("range", "7d")
         limit = int(websocket.query_params.get("limit", 50))
         offset = int(websocket.query_params.get("offset", 0))
-        action = websocket.query_params.get("action")  # optional
-        search = websocket.query_params.get("search")  # optional
 
-        # ---------- RANGE → DATES ----------
-        days = int(range_param.replace("d", ""))
-        end_date = datetime.utcnow()
-        start_date = end_date - timedelta(days=days)
+        logger.info(
+            f"Calling ActivityLogService | company_id={company_id} "
+            f"range={range_param}"
+        )
 
-        # ---------- SERVICE CALL (MATCHES SIGNATURE EXACTLY) ----------
         payload = await activity_log_service.get_activity_log(
             company_id=company_id,
+            range=range_param,
             limit=50,
             offset=0
         )
 
-
         await websocket.send_json(payload)
 
-        # Keep WS alive
         while True:
             await websocket.receive_text()
 
