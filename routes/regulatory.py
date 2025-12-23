@@ -13,7 +13,7 @@ import logging
 import asyncio
 
 from middleware.auth_middleware import get_current_user
-from app.db.postgres_client import get_db_connection
+from app.db.postgres_client import postgres_client
 from app.models.schemas import UserResponse
 from handlers.company_handler import CompanyHandler
 
@@ -54,10 +54,10 @@ class AddressResponse(BaseModel):
     contact_email: str
     contact_phone: str
     status: str  # pending, in_review, verified, rejected
-    twilio_address_sid: Optional[str]
-    twilio_bundle_sid: Optional[str]
-    twilio_end_user_sid: Optional[str]
-    rejection_reason: Optional[str]
+    twilio_address_sid: Optional[str] = None
+    twilio_bundle_sid: Optional[str] = None
+    twilio_end_user_sid: Optional[str] = None
+    rejection_reason: Optional[str] = None
     created_at: datetime
     updated_at: datetime
 
@@ -129,10 +129,8 @@ async def submit_to_twilio_background(
         )
         
         # Update database with Twilio results
-        conn = await get_db_connection()
-        
         if success:
-            await conn.execute(
+            await postgres_client.client.execute_query(
                 """
                 UPDATE regulatory_addresses
                 SET 
@@ -149,11 +147,11 @@ async def submit_to_twilio_background(
                 result.get("end_user_sid"),
                 result.get("regulation_sid"),
                 datetime.utcnow(),
-                uuid.UUID(address_id)
+                address_id
             )
             logger.info(f"✅ Successfully submitted address {address_id} to Twilio. Bundle: {result.get('bundle_sid')}")
         else:
-            await conn.execute(
+            await postgres_client.client.execute_query(
                 """
                 UPDATE regulatory_addresses
                 SET 
@@ -164,15 +162,14 @@ async def submit_to_twilio_background(
                 """,
                 result.get("error", "Unknown error"),
                 datetime.utcnow(),
-                uuid.UUID(address_id)
+                address_id
             )
             logger.error(f"❌ Failed to submit address {address_id} to Twilio: {result.get('error')}")
         
     except Exception as e:
         logger.exception(f"Error in Twilio background task for address {address_id}: {e}")
         try:
-            conn = await get_db_connection()
-            await conn.execute(
+            await postgres_client.client.execute_query(
                 """
                 UPDATE regulatory_addresses
                 SET status = 'failed', rejection_reason = $1, updated_at = $2
@@ -180,7 +177,7 @@ async def submit_to_twilio_background(
                 """,
                 str(e),
                 datetime.utcnow(),
-                uuid.UUID(address_id)
+                address_id
             )
         except Exception as db_err:
             logger.error(f"Failed to update address status: {db_err}")
@@ -204,15 +201,13 @@ async def create_address(
         if not company_id:
             company_id = await _ensure_user_access(current_user, company_handler)
         
-        conn = await get_db_connection()
-        
         # Check if address already exists for this company and country
-        existing = await conn.fetchrow(
+        existing = await postgres_client.client.execute_query_one(
             """
             SELECT id, status FROM regulatory_addresses 
             WHERE company_id = $1 AND country_code = $2 AND status NOT IN ('rejected', 'failed')
             """,
-            uuid.UUID(company_id), address.country_code
+            company_id, address.country_code
         )
         
         if existing:
@@ -222,11 +217,11 @@ async def create_address(
             )
         
         # Generate new ID
-        address_id = uuid.uuid4()
+        address_id = str(uuid.uuid4())
         now = datetime.utcnow()
         
         # Insert new address with 'pending' status
-        result = await conn.fetchrow(
+        result = await postgres_client.client.execute_query_one(
             """
             INSERT INTO regulatory_addresses (
                 id, company_id, country_code, business_name, address_line2,
@@ -238,7 +233,7 @@ async def create_address(
             )
             RETURNING *
             """,
-            address_id, uuid.UUID(company_id), address.country_code, address.business_name,
+            address_id, company_id, address.country_code, address.business_name,
             address.address_line2, address.street_address, address.city,
             address.region, address.postal_code, address.contact_name,
             address.contact_email, address.contact_phone,
@@ -248,7 +243,7 @@ async def create_address(
         # Add background task to submit to Twilio
         background_tasks.add_task(
             submit_to_twilio_background,
-            address_id=str(address_id),
+            address_id=address_id,
             country_code=address.country_code,
             business_name=address.business_name,
             street_address=address.street_address,
@@ -268,7 +263,7 @@ async def create_address(
             company_id=str(result['company_id']),
             country_code=result['country_code'],
             business_name=result['business_name'],
-            address_line2=result['address_line2'],
+            address_line2=result.get('address_line2'),
             street_address=result['street_address'],
             city=result['city'],
             region=result['region'],
@@ -307,28 +302,26 @@ async def get_addresses(
         if not company_id:
             company_id = await _ensure_user_access(current_user, company_handler)
         
-        conn = await get_db_connection()
-        
         # Build query
         if country_code:
-            results = await conn.fetch(
+            results = await postgres_client.client.execute_query(
                 """
                 SELECT id, country_code, status, business_name, city, created_at
                 FROM regulatory_addresses
                 WHERE company_id = $1 AND country_code = $2
                 ORDER BY created_at DESC
                 """,
-                uuid.UUID(company_id), country_code
+                company_id, country_code
             )
         else:
-            results = await conn.fetch(
+            results = await postgres_client.client.execute_query(
                 """
                 SELECT id, country_code, status, business_name, city, created_at
                 FROM regulatory_addresses
                 WHERE company_id = $1
                 ORDER BY created_at DESC
                 """,
-                uuid.UUID(company_id)
+                company_id
             )
         
         return [
@@ -340,12 +333,13 @@ async def get_addresses(
                 city=row['city'],
                 created_at=row['created_at']
             )
-            for row in results
+            for row in (results or [])
         ]
         
     except HTTPException:
         raise
     except Exception as e:
+        logger.exception(f"Failed to get addresses: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to get addresses: {str(e)}")
 
 
@@ -358,13 +352,11 @@ async def get_address(
     Get a specific regulatory address by ID.
     """
     try:
-        conn = await get_db_connection()
-        
-        result = await conn.fetchrow(
+        result = await postgres_client.client.execute_query_one(
             """
             SELECT * FROM regulatory_addresses WHERE id = $1
             """,
-            uuid.UUID(address_id)
+            address_id
         )
         
         if not result:
@@ -375,7 +367,7 @@ async def get_address(
             company_id=str(result['company_id']),
             country_code=result['country_code'],
             business_name=result['business_name'],
-            address_line2=result['address_line2'],
+            address_line2=result.get('address_line2'),
             street_address=result['street_address'],
             city=result['city'],
             region=result['region'],
@@ -395,6 +387,7 @@ async def get_address(
     except HTTPException:
         raise
     except Exception as e:
+        logger.exception(f"Failed to get address: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to get address: {str(e)}")
 
 
@@ -407,12 +400,10 @@ async def delete_address(
     Delete a regulatory address (only if pending/failed/rejected).
     """
     try:
-        conn = await get_db_connection()
-        
         # Check address exists and status
-        result = await conn.fetchrow(
+        result = await postgres_client.client.execute_query_one(
             "SELECT status FROM regulatory_addresses WHERE id = $1",
-            uuid.UUID(address_id)
+            address_id
         )
         
         if not result:
@@ -424,9 +415,9 @@ async def delete_address(
                 detail=f"Cannot delete address with status '{result['status']}'. Contact support."
             )
         
-        await conn.execute(
+        await postgres_client.client.execute_query(
             "DELETE FROM regulatory_addresses WHERE id = $1",
-            uuid.UUID(address_id)
+            address_id
         )
         
         return {"message": "Address deleted successfully"}
@@ -434,6 +425,7 @@ async def delete_address(
     except HTTPException:
         raise
     except Exception as e:
+        logger.exception(f"Failed to delete address: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to delete address: {str(e)}")
 
 
@@ -447,13 +439,11 @@ async def retry_address_submission(
     Retry Twilio submission for a failed address.
     """
     try:
-        conn = await get_db_connection()
-        
-        result = await conn.fetchrow(
+        result = await postgres_client.client.execute_query_one(
             """
             SELECT * FROM regulatory_addresses WHERE id = $1
             """,
-            uuid.UUID(address_id)
+            address_id
         )
         
         if not result:
@@ -466,7 +456,7 @@ async def retry_address_submission(
             )
         
         # Reset status to pending
-        await conn.execute(
+        await postgres_client.client.execute_query(
             """
             UPDATE regulatory_addresses
             SET status = 'pending', rejection_reason = NULL, 
@@ -474,7 +464,7 @@ async def retry_address_submission(
                 twilio_end_user_sid = NULL, updated_at = $1
             WHERE id = $2
             """,
-            datetime.utcnow(), uuid.UUID(address_id)
+            datetime.utcnow(), address_id
         )
         
         # Queue background task
@@ -484,7 +474,7 @@ async def retry_address_submission(
             country_code=result['country_code'],
             business_name=result['business_name'],
             street_address=result['street_address'],
-            address_line2=result['address_line2'],
+            address_line2=result.get('address_line2'),
             city=result['city'],
             region=result['region'],
             postal_code=result['postal_code'],
@@ -498,6 +488,7 @@ async def retry_address_submission(
     except HTTPException:
         raise
     except Exception as e:
+        logger.exception(f"Failed to retry: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to retry: {str(e)}")
 
 
@@ -518,8 +509,6 @@ async def twilio_bundle_status_webhook(payload: TwilioWebhookPayload):
     try:
         logger.info(f"Received Twilio webhook: Bundle={payload.BundleSid}, Status={payload.Status}")
         
-        conn = await get_db_connection()
-        
         # Map Twilio status to our status
         status_map = {
             'twilio-approved': 'verified',
@@ -532,7 +521,7 @@ async def twilio_bundle_status_webhook(payload: TwilioWebhookPayload):
         new_status = status_map.get(payload.Status, 'pending')
         
         # Update address status
-        result = await conn.fetchrow(
+        result = await postgres_client.client.execute_query_one(
             """
             UPDATE regulatory_addresses
             SET status = $1, rejection_reason = $2, updated_at = $3
@@ -568,9 +557,7 @@ async def get_verified_bundle(
     try:
         company_id = await _ensure_user_access(current_user, company_handler)
         
-        conn = await get_db_connection()
-        
-        result = await conn.fetchrow(
+        result = await postgres_client.client.execute_query_one(
             """
             SELECT twilio_bundle_sid
             FROM regulatory_addresses
@@ -578,10 +565,10 @@ async def get_verified_bundle(
             ORDER BY created_at DESC
             LIMIT 1
             """,
-            uuid.UUID(company_id), country_code.upper()
+            company_id, country_code.upper()
         )
         
-        if not result or not result['twilio_bundle_sid']:
+        if not result or not result.get('twilio_bundle_sid'):
             raise HTTPException(
                 status_code=404, 
                 detail=f"No verified address found for {country_code}. Please submit an address for verification first."
@@ -596,4 +583,5 @@ async def get_verified_bundle(
     except HTTPException:
         raise
     except Exception as e:
+        logger.exception(f"Failed to get bundle: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to get bundle: {str(e)}")

@@ -14,12 +14,11 @@ from typing import Optional, Literal
 import base64
 import httpx
 import logging
-import uuid
 
 from middleware.auth_middleware import get_current_user
 from config import Config
 from app.db.queries.agent_number_queries import create_agent_number
-from app.db.postgres_client import get_db_connection
+from app.db.postgres_client import postgres_client
 from handlers.company_handler import CompanyHandler
 from app.models.schemas import UserResponse
 
@@ -115,9 +114,7 @@ def _get_country_from_phone(phone_number: str) -> str:
 async def _get_verified_bundle(company_id: str, country_code: str) -> Optional[str]:
     """Get verified regulatory bundle SID for a country"""
     try:
-        conn = await get_db_connection()
-        
-        result = await conn.fetchrow(
+        result = await postgres_client.client.execute_query_one(
             """
             SELECT twilio_bundle_sid
             FROM regulatory_addresses
@@ -125,7 +122,7 @@ async def _get_verified_bundle(company_id: str, country_code: str) -> Optional[s
             ORDER BY created_at DESC
             LIMIT 1
             """,
-            uuid.UUID(company_id), country_code
+            company_id, country_code
         )
         return result['twilio_bundle_sid'] if result else None
         
@@ -137,9 +134,7 @@ async def _get_verified_bundle(company_id: str, country_code: str) -> Optional[s
 async def _get_address_status(company_id: str, country_code: str) -> dict:
     """Get current address verification status for a country"""
     try:
-        conn = await get_db_connection()
-        
-        result = await conn.fetchrow(
+        result = await postgres_client.client.execute_query_one(
             """
             SELECT id, status, rejection_reason, twilio_bundle_sid
             FROM regulatory_addresses
@@ -147,7 +142,7 @@ async def _get_address_status(company_id: str, country_code: str) -> dict:
             ORDER BY created_at DESC
             LIMIT 1
             """,
-            uuid.UUID(company_id), country_code
+            company_id, country_code
         )
         
         if not result:
@@ -161,8 +156,8 @@ async def _get_address_status(company_id: str, country_code: str) -> dict:
             "has_address": True,
             "address_id": str(result['id']),
             "status": result['status'],
-            "rejection_reason": result['rejection_reason'],
-            "bundle_sid": result['twilio_bundle_sid']
+            "rejection_reason": result.get('rejection_reason'),
+            "bundle_sid": result.get('twilio_bundle_sid')
         }
         
     except Exception as e:
