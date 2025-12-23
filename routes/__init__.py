@@ -26,6 +26,7 @@ from .call_reports import router as call_reports_router
 from .sentiment_analysis import router as sentiment_router
 from .urgency_detection import router as urgency_router
 from .regulatory import router as regulatory_router
+from .activity_log import router as activity_log_router
 
 # Create the main API router
 api_router = APIRouter()
@@ -59,6 +60,7 @@ api_router.include_router(call_reports_router, prefix="/call_reports", tags=["Ca
 api_router.include_router(sentiment_router, prefix="/sentiment-analysis", tags=["Sentiment Analytics"])
 api_router.include_router(urgency_router, prefix="/urgency-detection", tags=["Urgency Detection"])
 api_router.include_router(regulatory_router, tags=["Regulatory Compliance"])
+api_router.include_router(activity_log_router, prefix="/activity-log", tags=["Activity Log"])
 
 # You can also create versioned API routers
 v1_router = APIRouter()
@@ -88,5 +90,6 @@ v1_router.include_router(company_metrics_router, prefix="/company-metrics", tags
 v1_router.include_router(call_reports_router, prefix="/call_reports", tags=["Call Reports"])
 v1_router.include_router(urgency_router, prefix="/urgency-detection", tags=["Urgency Detection"])
 v1_router.include_router(regulatory_router, tags=["Regulatory Compliance"])
+v1_router.include_router(activity_log_router, prefix="/activity-log", tags=["Activity Log"])
 
 __all__ = ["api_router", "v1_router"]
