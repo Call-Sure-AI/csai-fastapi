@@ -149,3 +149,5 @@ Keeps the main.py focused on app configuration
 Makes routes easier to manage and test
 Provides better monitoring and debugging capabilities
 Scales better as your system grows
+
+dir /s /b /a:-d | findstr /i /v "\\.venv\\" | findstr /i /v "\\__pycache__\\" | findstr /i /v "\\.git\\" | findstr /i /v "\\.github\\"
