@@ -63,11 +63,14 @@ async def websocket_agent_stats_endpoint(
     Frontend connects to: ws://your-domain/api/agent-stats/ws/{company_id}
     """
     await websocket.accept()
-    logger.info(f"✅ WebSocket connected for agent stats: {company_id}")
+    logger.info(f"WebSocket connected for agent stats: {company_id}")
     
     try:
         # Send initial stats immediately
         stats = await get_weekly_agent_stats(company_id)
+
+        for stat in stats:
+            stat["success_rate"] = (stat["completed_calls"] / stat["failed_calls"])*100
         
         today = datetime.now()
         start_of_week = today - timedelta(days=today.weekday())
