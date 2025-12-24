@@ -70,8 +70,11 @@ async def websocket_agent_stats_endpoint(
         stats = await get_weekly_agent_stats(company_id)
 
         for stat in stats:
-            stat["success_rate"] = (stat["completed_calls"] / stat["failed_calls"])*100
-        
+            if total_calls:
+                stat["success_rate"] = (stat["completed_calls"] / stat["total_calls"])*100
+            else:
+                stat["success_rate"] = 0
+
         today = datetime.now()
         start_of_week = today - timedelta(days=today.weekday())
         
