@@ -30,22 +30,36 @@ async def get_weekly_agent_stats(company_id: str):
         start_of_week = start_of_week.replace(hour=0, minute=0, second=0, microsecond=0)
         
         rows = await conn.fetch("""
-            SELECT 
-                an.agent_id,
-                an.agent_name,
-                COALESCE(a.name, an.agent_name) as agent_display_name,
-                COUNT(c.id) as total_calls,
-                COUNT(CASE WHEN c.status = 'completed' THEN 1 END) as completed_calls,
-                COUNT(CASE WHEN c.status = 'failed' THEN 1 END) as failed_calls,
-                AVG(c.duration) as avg_duration,
-                SUM(c.cost) as total_cost
-            FROM public."AgentNumber" an
-            LEFT JOIN public."Agent" a ON an.agent_id = a.id
-            LEFT JOIN public."Call" c ON c.from_number = an.phone_number 
+                SELECT 
+                    an.agent_id,
+                    an.agent_name,
+                    COALESCE(a.name, an.agent_name) AS agent_display_name,
+
+                    COUNT(c.id) AS total_calls,
+
+                    COUNT(*) FILTER (WHERE c.status = 'completed') AS completed_calls,
+                    COUNT(*) FILTER (WHERE c.status = 'no-answer')    AS failed_calls,
+
+                    AVG(c.duration) AS avg_duration,
+                    SUM(c.cost)     AS total_cost
+
+                FROM public."AgentNumber" an
+
+                LEFT JOIN public."Agent" a 
+                    ON an.agent_id = a.id
+
+                LEFT JOIN public."Call" c 
+                    ON (
+                        c.from_number = an.phone_number
+                        OR c.to_number = an.phone_number
+                    )
                 AND c.created_at >= $2
-            WHERE an.company_id = $1
-            GROUP BY an.agent_id, an.agent_name, a.name
-            ORDER BY total_calls DESC
+                AND c.company_id = an.company_id
+
+                WHERE an.company_id = $1
+
+                GROUP BY an.agent_id, an.agent_name, a.name
+                ORDER BY total_calls DESC;
         """, company_id, start_of_week)
         
         return [serialize_row(dict(row)) for row in rows]
