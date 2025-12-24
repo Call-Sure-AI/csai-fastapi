@@ -70,7 +70,7 @@ async def websocket_agent_stats_endpoint(
         stats = await get_weekly_agent_stats(company_id)
 
         for stat in stats:
-            if total_calls:
+            if stats["total_calls"]:
                 stat["success_rate"] = (stat["completed_calls"] / stat["total_calls"])*100
             else:
                 stat["success_rate"] = 0
