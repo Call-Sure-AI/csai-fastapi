@@ -204,7 +204,7 @@ async def update_campaign_agent(
     company_id = company["id"]
 
     payload = UpdateCampaignRequest(agent_id=agent_id)
-    updated = await svc.update_campaign(campaign_id, company_id, payload)
+    updated = await svc.update_campaign(campaign_id, company_id, payload, current_user.id)
     if not updated:
         raise HTTPException(404, "Campaign not found")
 
