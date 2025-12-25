@@ -73,7 +73,7 @@ async def start_campaign(
         return {"message": f"Campaign {campaign_id} is already active"}
 
     payload  = UpdateCampaignRequest(status="active")
-    updated  = await svc.update_campaign(campaign_id, company_id, payload)
+    updated  = await svc.update_campaign(campaign_id, company_id, payload, current_user.id)
     if not updated:
         raise HTTPException(500, "Failed to activate campaign")
 
