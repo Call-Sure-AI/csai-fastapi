@@ -383,7 +383,7 @@ async def _set_status(
     company_id: str,
     status: str,
     svc: CampaignService,
-    current_user:    UserResponse   = Depends(get_current_user)
+    current_user: UserResponse = Depends(get_current_user)
 ):
     camp = await svc.get_campaign(campaign_id, company_id)
     if not camp:
