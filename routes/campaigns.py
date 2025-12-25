@@ -338,14 +338,14 @@ async def update_campaign(
         existing = await conn2.fetchrow('SELECT status FROM "campaign" WHERE id = $1', campaign_id)
         prev_status = existing['status'] if existing else None
 
-    updated = await svc.update_campaign(campaign_id, campaign_company_id, payload)
+    updated = await svc.update_campaign(campaign_id, campaign_company_id, payload, current_user.id)
     if not updated:
         raise HTTPException(404, "Campaign not found")
 
     try:
         new_status = getattr(updated, "status", None) or (updated.get("status") if isinstance(updated, dict) else None)
         if prev_status != new_status:
-            await svc.log_campaign_status_change(campaign_id, new_status)
+            await svc.log_campaign_status_change(campaign_id, new_status, current_user.id , prev_status)
     except Exception:
         logger.exception("Failed to write campaign status history for %s", campaign_id)
 
