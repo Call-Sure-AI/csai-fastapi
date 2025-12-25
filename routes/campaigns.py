@@ -93,7 +93,7 @@ async def _activate_ai_agents(
     agent_handler: AgentHandler = Depends(AgentHandler)
 ):
 
-    log.info("AI-bootstrap: scanning agents for user=%s company=%s", user_id, company_id)
+    #log.info("AI-bootstrap: scanning agents for user=%s company=%s", user_id, company_id)
 
     agents = await agent_handler.get_agents_by_user_id(user_id)
     if agents:
