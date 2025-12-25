@@ -382,7 +382,8 @@ async def _set_status(
     campaign_id: str,
     company_id: str,
     status: str,
-    svc: CampaignService
+    svc: CampaignService,
+    current_user:    UserResponse   = Depends(get_current_user)
 ):
     camp = await svc.get_campaign(campaign_id, company_id)
     if not camp:
@@ -392,7 +393,7 @@ async def _set_status(
         return {"message": f"Campaign {campaign_id} is already {status}"}
 
     payload = UpdateCampaignRequest(status=status)
-    if not await svc.update_campaign(campaign_id, company_id, payload):
+    if not await svc.update_campaign(campaign_id, company_id, payload, current_user.id):
         raise HTTPException(500, f"Could not set status to {status}")
 
     return {"message": f"Campaign {campaign_id} marked {status}"}
