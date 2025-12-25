@@ -77,12 +77,12 @@ async def start_campaign(
     if not updated:
         raise HTTPException(500, "Failed to activate campaign")
 
-    background_tasks.add_task(
-        _activate_ai_agents,
-        campaign_id,
-        company_id,
-        current_user.id
-    )
+    #background_tasks.add_task(
+    #    _activate_ai_agents,
+    #    campaign_id,
+    #    company_id,
+    #    current_user.id
+    #)
 
     return {"message": f"Campaign {campaign_id} started – AI agents launching"}
 
