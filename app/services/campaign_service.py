@@ -290,7 +290,8 @@ class CampaignService:
         self,
         campaign_id: str,
         company_id: str,
-        payload: UpdateCampaignRequest
+        payload: UpdateCampaignRequest,
+        user_id: str = None
     ) -> CampaignResponse | None:
 
         set_clauses: list[str] = []
@@ -347,7 +348,7 @@ class CampaignService:
             async with await get_db_connection() as conn:
                 await self.activity_queries.create_activity(
                     conn=conn,
-                    user_id=company_id,
+                    user_id=user_id or company_id,
                     action="UPDATE",
                     entity_type="CAMPAIGN",
                     entity_id=campaign_id,
@@ -1432,7 +1433,7 @@ class CampaignService:
             logger.error(f"Error fetching campaign leads for {campaign_id}: {e}")
             raise
 
-    async def log_campaign_status_change(self, campaign_id: str, status: str) -> dict | None:
+    async def log_campaign_status_change(self, campaign_id: str, status: str, user_id: str = None) -> dict | None:
         activity_id = f"ACT-{uuid.uuid4().hex[:8].upper()}"
         now = datetime.utcnow()
         try:
@@ -1449,17 +1450,21 @@ class CampaignService:
                     now
                 )
 
-                await self.activity_queries.create_activity(
-                    conn=conn,
-                    user_id=user_id,
-                    action="UPDATE",
-                    entity_type="CAMPAIGN",
-                    entity_id=campaign_id,
-                    metadata={
-                        "old_status": old_status,
-                        "new_status": new_status
-                    }
-                )
+                if user_id:
+                    try:
+                        await self.activity_queries.create_activity(
+                            conn=conn,
+                            user_id=user_id,
+                            action="UPDATE",
+                            entity_type="CAMPAIGN",
+                            entity_id=campaign_id,
+                            metadata={
+                                "new_status": status
+                            }
+                        )
+                    except Exception as e:
+                        logger.warning(f"Activity logging failed: {e}")
+
                 return dict(rec) if rec else None
         except Exception as e:
             logger.exception("Failed to log campaign status change for %s -> %s: %s", campaign_id, status, e)
