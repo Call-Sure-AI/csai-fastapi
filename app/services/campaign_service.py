@@ -1433,7 +1433,7 @@ class CampaignService:
             logger.error(f"Error fetching campaign leads for {campaign_id}: {e}")
             raise
 
-    async def log_campaign_status_change(self, campaign_id: str, status: str, user_id: str = None, prev_status: str = None)
+    async def log_campaign_status_change(self, campaign_id: str, status: str, user_id: str = None, prev_status: str = None):
         activity_id = f"ACT-{uuid.uuid4().hex[:8].upper()}"
         now = datetime.utcnow()
         try:
