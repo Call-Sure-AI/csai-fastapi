@@ -1,4 +1,4 @@
-# app\services\campaign_service.py
+# app/services/campaign_service.py
 import uuid
 import json
 import csv
@@ -31,6 +31,19 @@ import httpx
 from app.db.queries.activity_queries import ActivityQueries
 
 logger = logging.getLogger(__name__)
+
+# ============================================
+# TIMEOUT AND RETRY CONFIGURATION
+# ============================================
+CALL_API_TIMEOUT = httpx.Timeout(
+    connect=10.0,    # 10 seconds to establish connection
+    read=60.0,       # 60 seconds to read response (increased from 30)
+    write=30.0,      # 30 seconds to write request
+    pool=10.0        # 10 seconds to acquire connection from pool
+)
+CALL_API_MAX_RETRIES = 3
+CALL_API_RETRY_DELAY = 2.0  # seconds between retries
+
 
 class CampaignService:
     def __init__(self):
@@ -278,7 +291,7 @@ class CampaignService:
         campaign_id: str,
         company_id: str,
         payload: UpdateCampaignRequest,
-        created_by: str
+        user_id: str = None
     ) -> CampaignResponse | None:
 
         set_clauses: list[str] = []
@@ -335,7 +348,7 @@ class CampaignService:
             async with await get_db_connection() as conn:
                 await self.activity_queries.create_activity(
                     conn=conn,
-                    user_id=created_by,
+                    user_id=user_id or company_id,
                     action="UPDATE",
                     entity_type="CAMPAIGN",
                     entity_id=campaign_id,
@@ -1417,7 +1430,7 @@ class CampaignService:
             logger.error(f"Error fetching campaign leads for {campaign_id}: {e}")
             raise
 
-    async def log_campaign_status_change(self, campaign_id: str, status: str, user_id: str, old_status: str) -> dict | None:
+    async def log_campaign_status_change(self, campaign_id: str, status: str, user_id: str = None, prev_status: str = None):
         activity_id = f"ACT-{uuid.uuid4().hex[:8].upper()}"
         now = datetime.utcnow()
         try:
@@ -1434,17 +1447,21 @@ class CampaignService:
                     now
                 )
 
-                await self.activity_queries.create_activity(
-                    conn=conn,
-                    user_id=user_id,
-                    action="UPDATE",
-                    entity_type="CAMPAIGN",
-                    entity_id=campaign_id,
-                    metadata={
-                        "old_status": old_status,
-                        "new_status": status
-                    }
-                )
+                if user_id:
+                    try:
+                        await self.activity_queries.create_activity(
+                            conn=conn,
+                            user_id=user_id,
+                            action="UPDATE",
+                            entity_type="CAMPAIGN",
+                            entity_id=campaign_id,
+                            metadata={
+                                "new_status": status
+                            }
+                        )
+                    except Exception as e:
+                        logger.warning(f"Activity logging failed: {e}")
+
                 return dict(rec) if rec else None
         except Exception as e:
             logger.exception("Failed to log campaign status change for %s -> %s: %s", campaign_id, status, e)
@@ -1695,6 +1712,71 @@ class CampaignService:
             
             return result
 
+
+# ============================================
+# HELPER FUNCTION: Make API call with retries
+# ============================================
+async def _make_outbound_call_request(
+    url: str,
+    payload: dict,
+    max_retries: int = CALL_API_MAX_RETRIES,
+    retry_delay: float = CALL_API_RETRY_DELAY
+) -> tuple[httpx.Response | None, dict | None, Exception | None]:
+    """
+    Make an outbound call API request with retry logic for timeout errors.
+    
+    Returns:
+        tuple of (response, json_data, error)
+    """
+    last_error = None
+    
+    for attempt in range(1, max_retries + 1):
+        try:
+            async with httpx.AsyncClient(timeout=CALL_API_TIMEOUT) as client:
+                resp = await client.post(
+                    url,
+                    json=payload,
+                    headers={"Content-Type": "application/json"}
+                )
+                
+                try:
+                    json_data = resp.json()
+                except Exception:
+                    json_data = {}
+                
+                return resp, json_data, None
+                
+        except (httpx.ReadTimeout, httpx.ConnectTimeout, httpx.WriteTimeout) as e:
+            last_error = e
+            logger.warning(
+                "[activate] Timeout on attempt %d/%d for call to %s: %s",
+                attempt, max_retries, payload.get("to_number"), str(e)
+            )
+            
+            if attempt < max_retries:
+                logger.info("[activate] Retrying in %.1f seconds...", retry_delay)
+                await asyncio.sleep(retry_delay)
+                # Exponential backoff
+                retry_delay *= 1.5
+            else:
+                logger.error(
+                    "[activate] All %d attempts failed for call to %s",
+                    max_retries, payload.get("to_number")
+                )
+                
+        except httpx.HTTPError as e:
+            last_error = e
+            logger.error("[activate] HTTP error calling %s: %s", payload.get("to_number"), str(e))
+            break
+            
+        except Exception as e:
+            last_error = e
+            logger.exception("[activate] Unexpected error calling %s: %s", payload.get("to_number"), str(e))
+            break
+    
+    return None, None, last_error
+
+
 async def _process_campaign_on_activate(campaign_id: str, company_id: str, user_id: str):
     svc = CampaignService()
     try:
@@ -1703,7 +1785,6 @@ async def _process_campaign_on_activate(campaign_id: str, company_id: str, user_
             logger.error(f"[activate] Campaign not found: {campaign_id}")
             return
 
-        #automation = getattr(campaign, "automation", {}) or campaign.automation if hasattr(campaign, "automation") else {}
         agent_id = getattr(campaign, "agent_id", None) or (campaign.agent_id if hasattr(campaign, "agent_id") else None)
 
         automation_model = getattr(campaign, "automation", None)
@@ -1741,7 +1822,8 @@ async def _process_campaign_on_activate(campaign_id: str, company_id: str, user_
                 logger.info("[activate] Agent phone: %s, provider: %s", from_number, provider)
             except Exception as e:
                 logger.error("[activate] Failed to get agent number for %s: %s", agent_id, e)
-                return {"success": False, "call_sid": None}
+                return {"success": False, "call_sid": None, "processor_status": None, "to_number": None, "lead_id": lead_id}
+            
             phone_raw = (lead.get("phone") or "").strip()
             country_code_raw = str(lead.get("country_code") or "").strip()
             if not phone_raw:
@@ -1758,7 +1840,8 @@ async def _process_campaign_on_activate(campaign_id: str, company_id: str, user_
             else:
                 to_number = f"+{phone_digits}" if not phone_raw.startswith("+") else phone_raw
 
-            logger.info(f"To Number: {to_number}")
+            logger.info(f"[activate] Dialing lead {lead_id} -> {to_number}")
+            
             customer_name = (lead.get("first_name") or "").strip()
             payload = {
                 "from_number": from_number,
@@ -1772,44 +1855,63 @@ async def _process_campaign_on_activate(campaign_id: str, company_id: str, user_
 
             }
 
-            try:
-                async with sem:
-                    async with httpx.AsyncClient(timeout=30.0) as client:
-                        resp = await client.post(
-                            f"https://processor.callsure.ai/api/v1/calls/outbound?provider={provider}",
-                            json=payload,
-                            headers={"Content-Type": "application/json"}
+            async with sem:
+                # Use the retry helper function
+                resp, json_data, error = await _make_outbound_call_request(
+                    url=f"https://processor.callsure.ai/api/v1/calls/outbound?provider={provider}",
+                    payload=payload
+                )
+                
+                if error:
+                    # All retries failed
+                    logger.error("[activate] Call initiation failed for lead %s to %s after retries: %s", 
+                                lead_id, to_number, error)
+                    try:
+                        await svc._initiate_lead_call(
+                            campaign_id=campaign_id, 
+                            lead_id=lead_id, 
+                            to_number=to_number, 
+                            call_sid=None, 
+                            call_status='failed'
                         )
-                try:
-                    j = resp.json()
-                except Exception:
-                    j = {}
+                    except Exception:
+                        pass
+                    return {"success": False, "call_sid": None, "processor_status": "failed", "to_number": to_number, "lead_id": lead_id}
+                
+                if resp is None:
+                    return {"success": False, "call_sid": None, "processor_status": None, "to_number": to_number, "lead_id": lead_id}
 
-                processor_status = j.get("status") or (j.get("success") and "queued") or None
-                call_sid = j.get("call_sid")
+                processor_status = json_data.get("status") or (json_data.get("success") and "queued") or None
+                call_sid = json_data.get("call_sid")
 
                 if resp.status_code in (200, 201, 202) and (processor_status or call_sid):
                     try:
-                        await svc._initiate_lead_call(campaign_id=campaign_id, lead_id=lead_id, to_number=to_number, call_sid=call_sid, call_status=processor_status)
+                        await svc._initiate_lead_call(
+                            campaign_id=campaign_id, 
+                            lead_id=lead_id, 
+                            to_number=to_number, 
+                            call_sid=call_sid, 
+                            call_status=processor_status
+                        )
                     except Exception as e:
                         logger.warning("[activate] _initiate_lead_call failed (initial): %s", e)
-                    logger.info("[activate] Call initiated for lead %s -> %s (campaign %s) sid=%s status=%s", lead_id, to_number, campaign_id, call_sid, processor_status)
+                    
+                    logger.info("[activate] Call initiated for lead %s -> %s (campaign %s) sid=%s status=%s", 
+                               lead_id, to_number, campaign_id, call_sid, processor_status)
                     return {"success": True, "call_sid": call_sid, "processor_status": processor_status, "to_number": to_number, "lead_id": lead_id}
                 else:
+                    logger.warning("[activate] Call API returned %s for %s: %s", resp.status_code, to_number, resp.text)
                     try:
-                        logger.error("[activate] Call API failed: status=%s, body=%s, lead=%s", resp.status_code, resp.text, lead_id)
-                        await svc._initiate_lead_call(campaign_id=campaign_id, lead_id=lead_id, to_number=to_number, call_sid=call_sid, call_status=processor_status or 'no-answer')
+                        await svc._initiate_lead_call(
+                            campaign_id=campaign_id, 
+                            lead_id=lead_id, 
+                            to_number=to_number, 
+                            call_sid=call_sid, 
+                            call_status=processor_status or 'no-answer'
+                        )
                     except Exception:
                         pass
-                    logger.warning("[activate] Call API returned %s for %s: %s", resp.status_code, to_number, resp.text)
                     return {"success": False, "call_sid": call_sid, "processor_status": processor_status, "to_number": to_number, "lead_id": lead_id}
-            except Exception as e:
-                logger.exception("[activate] Error initiating call for lead %s to %s: %s", lead_id, to_number, e)
-                try:
-                    await svc._initiate_lead_call(campaign_id=campaign_id, lead_id=lead_id, to_number=to_number, call_sid=None, call_status='no-answer')
-                except Exception:
-                    pass
-                return {"success": False, "call_sid": None, "processor_status": None, "to_number": None, "lead_id": lead_id}
 
         async def process_with_retries(lead: dict):
             lead_id = lead.get("id")
