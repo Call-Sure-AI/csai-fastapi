@@ -1177,6 +1177,44 @@ class CampaignService:
                 params.append(campaign_id)
                 await conn.execute(query, *params)
 
+    async def ensure_call_campaign_binding(
+        self,
+        *,
+        call_sid: str,
+        campaign_id: str,
+        company_id: str,
+        to_number: str | None,
+        from_number: str | None
+    ) -> None:
+
+        async with await get_db_connection() as conn:
+            await conn.execute(
+                """
+                INSERT INTO "Call" (
+                    call_sid,
+                    campaign_id,
+                    company_id,
+                    to_number,
+                    from_number,
+                    call_type,
+                    status,
+                    created_at
+                )
+                VALUES ($1, $2, $3, $4, $5, 'outgoing', 'initiated', NOW())
+                ON CONFLICT (call_sid)
+                DO UPDATE SET
+                    campaign_id = COALESCE("Call".campaign_id, EXCLUDED.campaign_id),
+                    company_id  = COALESCE("Call".company_id,  EXCLUDED.company_id),
+                    to_number   = COALESCE("Call".to_number,   EXCLUDED.to_number),
+                    from_number = COALESCE("Call".from_number, EXCLUDED.from_number)
+                """,
+                call_sid,
+                campaign_id,
+                company_id,
+                to_number,
+                from_number
+            )
+
     async def _initiate_lead_call(self, campaign_id: str, lead_id: str | None, to_number: str | None, call_sid: str | None, call_status: str | None):
         """
         Persist a call attempt for a lead in campaign_lead table.
@@ -1850,9 +1888,7 @@ async def _process_campaign_on_activate(campaign_id: str, company_id: str, user_
                 "agent_id": agent_id,
                 "customer_name": customer_name,
                 "campaign_id": campaign_id,
-                "call_script": call_script,
-                "campaign_id": campaign_id
-
+                "call_script": call_script
             }
 
             async with sem:
@@ -1883,6 +1919,15 @@ async def _process_campaign_on_activate(campaign_id: str, company_id: str, user_
 
                 processor_status = json_data.get("status") or (json_data.get("success") and "queued") or None
                 call_sid = json_data.get("call_sid")
+                
+                if call_sid:
+                    await svc.ensure_call_campaign_binding(
+                        call_sid=call_sid,
+                        campaign_id=campaign_id,
+                        company_id=company_id,
+                        to_number=to_number,
+                        from_number=from_number
+                    )
 
                 if resp.status_code in (200, 201, 202) and (processor_status or call_sid):
                     try:
