@@ -1221,6 +1221,7 @@ class CampaignService:
                 to_number,
             )
 
+
     async def _initiate_lead_call(self, campaign_id: str, lead_id: str | None, to_number: str | None, call_sid: str | None, call_status: str | None):
         """
         Persist a call attempt for a lead in campaign_lead table.
