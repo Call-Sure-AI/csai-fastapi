@@ -1187,10 +1187,12 @@ class CampaignService:
         from_number: str | None
     ) -> None:
 
+        call_id = str(uuid.uuid4())
         async with await get_db_connection() as conn:
             await conn.execute(
                 """
                 INSERT INTO "Call" (
+                    id,
                     call_sid,
                     campaign_id,
                     company_id,
@@ -1208,6 +1210,7 @@ class CampaignService:
                     to_number   = COALESCE("Call".to_number,   EXCLUDED.to_number),
                     from_number = COALESCE("Call".from_number, EXCLUDED.from_number)
                 """,
+                call_id,
                 call_sid,
                 campaign_id,
                 company_id,
