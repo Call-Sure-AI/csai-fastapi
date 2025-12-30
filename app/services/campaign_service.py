@@ -435,16 +435,13 @@ class CampaignService:
             # Calls (fully qualified columns)
             calls = await conn.fetch("""
                 SELECT
-                    c.status      AS call_status,
-                    c.duration    AS duration,
-                    c.to_number   AS to_number
-                FROM "Call" c
-                JOIN "AgentNumber" an
-                    ON an.phone_number = c.from_number
-                JOIN "campaign" camp
-                    ON camp.agent_id = an.agent_id
-                WHERE camp.id = $1
-                  AND c.call_type = 'outgoing'
+                status AS call_status,
+                duration,
+                to_number
+                FROM "Call"
+                WHERE campaign_id = $1
+                AND call_type = 'outgoing';
+
             """, campaign_id)
 
             # Bookings
@@ -1597,16 +1594,12 @@ class CampaignService:
         """
 
         sql = """
-        SELECT c.*
-        FROM "Call" c
-        JOIN "AgentNumber" an
-            ON an.phone_number = c.from_number
-        JOIN "campaign" camp
-            ON camp.agent_id = an.agent_id
-        WHERE camp.id = $1
-          AND c.call_type = 'outgoing'
-        ORDER BY c.created_at DESC
-        LIMIT $2
+            SELECT *
+            FROM "Call"
+            WHERE campaign_id = $1
+            AND call_type = 'outgoing'
+            ORDER BY created_at DESC
+            LIMIT $2;
         """
 
         async with await get_db_connection() as conn:
@@ -1774,7 +1767,9 @@ async def _process_campaign_on_activate(campaign_id: str, company_id: str, user_
                 "agent_id": agent_id,
                 "customer_name": customer_name,
                 "campaign_id": campaign_id,
-                "call_script": call_script
+                "call_script": call_script,
+                "campaign_id": campaign_id
+
             }
 
             try:
