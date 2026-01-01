@@ -239,6 +239,8 @@ class CompanyMetricsService:
         - Accuracy: duration > 60s
         - Compliance: no ticket
         - Customer satisfaction: booking OR long call
+        
+        OPTIMIZED: Uses LEFT JOINs instead of EXISTS subqueries
         """
 
         rows = await conn.fetch("""
@@ -246,16 +248,13 @@ class CompanyMetricsService:
                 c.call_sid,
                 c.duration,
                 c.transcription,
-                EXISTS (
-                    SELECT 1 FROM booking b
-                    JOIN campaign cp ON cp.id = b.campaign_id
-                    WHERE cp.company_id = c.company_id
-                ) AS has_booking,
-                EXISTS (
-                    SELECT 1 FROM "Ticket" t
-                    WHERE t.meta_data->>'call_sid' = c.call_sid
-                ) AS has_ticket
+                b.id IS NOT NULL AS has_booking,
+                t.id IS NOT NULL AS has_ticket
             FROM "Call" c
+            LEFT JOIN "Ticket" t 
+                ON t.meta_data->>'call_sid' = c.call_sid
+            LEFT JOIN booking b 
+                ON b.meta_data->>'call_sid' = c.call_sid
             WHERE c.company_id = $1
             AND c.created_at >= $2
         """, company_id, start_time)
