@@ -240,7 +240,7 @@ class CompanyMetricsService:
         - Compliance: no ticket
         - Customer satisfaction: booking OR long call
         
-        OPTIMIZED: Uses LEFT JOINs instead of EXISTS subqueries
+        OPTIMIZED: Uses direct call_sid joins
         """
 
         rows = await conn.fetch("""
@@ -254,7 +254,7 @@ class CompanyMetricsService:
             LEFT JOIN "Ticket" t 
                 ON t.meta_data->>'call_sid' = c.call_sid
             LEFT JOIN booking b 
-                ON b.meta_data->>'call_sid' = c.call_sid
+                ON b.call_sid = c.call_sid
             WHERE c.company_id = $1
             AND c.created_at >= $2
         """, company_id, start_time)
