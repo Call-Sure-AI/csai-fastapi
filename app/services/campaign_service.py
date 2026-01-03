@@ -1638,12 +1638,13 @@ class CampaignService:
         """Get agent phone number and service provider"""
         async with await get_db_connection() as conn:
             row = await conn.fetchrow(
-                'SELECT phone_number, service_type FROM "AgentNumber" WHERE agent_id = $1',
+                'SELECT phone_number, provider FROM "AgentNumber" WHERE agent_id = $1',
+                #                      ^^^^^^^^ ✅ CHANGED from service_type
                 agent_id
             )
             if not row or not row["phone_number"]:
                 raise ValueError(f"No phone number assigned to agent {agent_id}")
-            return row["phone_number"], row["service_type"]
+            return row["phone_number"], row.get("provider", "twilio")  # ✅ Default to twilio
 
     async def get_campaign_calls_via_agents(
         self,

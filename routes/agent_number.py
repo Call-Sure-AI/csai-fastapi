@@ -1,3 +1,4 @@
+# routes\agent_number.py
 from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel, Field
 from typing import Optional
@@ -25,6 +26,7 @@ class AgentNumberCreate(BaseModel):
     company_id: str = Field(..., description="Company ID")
     agent_id: str = Field(..., description="Agent ID")
     phone_number: str = Field(..., max_length=20, description="Phone number")
+    provider: Optional[str] = Field("twilio", max_length=20, description="Provider (twilio/exotel)")  # ✅ ADD THIS
     account_sid: Optional[str] = Field(None, max_length=255, description="Twilio Account SID")
     auth_token: Optional[str] = Field(None, max_length=255, description="Twilio Auth Token")
     messaging_service_sid: Optional[str] = Field(None, max_length=255, description="Twilio Messaging Service SID")
@@ -34,6 +36,7 @@ class AgentNumberCreate(BaseModel):
 class AgentNumberUpdate(BaseModel):
     agent_id: Optional[str] = None
     phone_number: Optional[str] = None
+    provider: Optional[str] = None
     account_sid: Optional[str] = None
     auth_token: Optional[str] = None
     messaging_service_sid: Optional[str] = None
@@ -45,6 +48,7 @@ class AgentNumberResponse(BaseModel):
     company_id: str
     agent_id: Optional[str]
     phone_number: str
+    provider: Optional[str]
     account_sid: Optional[str]
     auth_token: Optional[str]
     messaging_service_sid: Optional[str]
@@ -89,15 +93,16 @@ async def create_agent_number(payload: AgentNumberCreate):
             # Insert new agent number
             row = await conn.fetchrow("""
                 INSERT INTO public."AgentNumber" (
-                    company_id, agent_id, phone_number, account_sid, 
+                    company_id, agent_id, phone_number, provider, account_sid,   # ✅ ADD provider
                     auth_token, messaging_service_sid, agent_name
-                ) VALUES ($1, $2, $3, $4, $5, $6, $7)
-                RETURNING id, company_id, agent_id, phone_number, account_sid, 
-                          auth_token, messaging_service_sid, agent_name
+                ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+                RETURNING id, company_id, agent_id, phone_number, provider, account_sid,  # ✅ ADD provider
+                        auth_token, messaging_service_sid, agent_name
             """, 
                 payload.company_id,
                 payload.agent_id,
                 payload.phone_number,
+                payload.provider or "twilio",  # ✅ ADD THIS
                 payload.account_sid,
                 payload.auth_token,
                 payload.messaging_service_sid,
@@ -124,8 +129,8 @@ async def get_agent_number(agent_number_id: str):
     try:
         async with await get_db_connection() as conn:
             row = await conn.fetchrow("""
-                SELECT id, company_id, agent_id, phone_number, account_sid, 
-                       auth_token, messaging_service_sid, agent_name
+                SELECT id, company_id, agent_id, phone_number, provider, account_sid,  # ✅ ADD provider
+                    auth_token, messaging_service_sid, agent_name
                 FROM public."AgentNumber"
                 WHERE id = $1
             """, agent_number_id)
@@ -150,8 +155,8 @@ async def get_company_agent_numbers(company_id: str):
     try:
         async with await get_db_connection() as conn:
             rows = await conn.fetch("""
-                SELECT id, company_id, agent_id, phone_number, account_sid, 
-                       auth_token, messaging_service_sid, agent_name
+                SELECT id, company_id, agent_id, phone_number, provider, account_sid,  # ✅ ADD provider
+                    auth_token, messaging_service_sid, agent_name
                 FROM public."AgentNumber"
                 WHERE company_id = $1
                 ORDER BY phone_number
@@ -216,6 +221,11 @@ async def update_agent_number(agent_number_id: str, payload: AgentNumberUpdate):
             if payload.agent_name is not None:
                 updates.append(f"agent_name = ${param_count}")
                 values.append(payload.agent_name)
+                param_count += 1
+
+            if payload.provider is not None:
+                updates.append(f"provider = ${param_count}")
+                values.append(payload.provider)
                 param_count += 1
             
             if not updates:
